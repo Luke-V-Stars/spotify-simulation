@@ -1,24 +1,25 @@
 /**
- * Owns the renderer, camera, orbit controls and render loop.
+ * Owns the renderer, camera, walking controls and render loop.
  *
  * Frames are rendered only when something changed: a still room costs almost
  * nothing, which matters on laptops and with large libraries.
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { ROOM_HEIGHT, ROOM_SIZE } from '../bookshelves/shelfLayout.js';
+import { EYE_HEIGHT } from '../bookshelves/shelfLayout.js';
+import { isWalkable } from './walkCollision.js';
+import { WalkControls } from './walkControls.js';
 
-const WALL_MARGIN = 0.25; // keeps the camera from clipping through the room's surfaces
 const FOCUS_DURATION_S = 1.0;
+const MIN_FOCUS_DISTANCE = 0.8;
+const FOCUS_SEARCH_STEP = 0.1;
 const MAX_PIXEL_RATIO = 2;
-
-const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 export class SceneManager {
   #frameCallbacks = [];
   #needsRender = true;
-  #tween = null;
+  /** @type {import('./walkCollision.js').WalkBounds|null} */
+  #walkBounds = null;
   #raycaster = new THREE.Raycaster();
   #ndc = new THREE.Vector2();
   #clock = new THREE.Timer();
@@ -41,18 +42,7 @@ export class SceneManager {
     this.scene.background = new THREE.Color(0x050403);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.05, 60);
-    this.camera.position.set(6.2, 2.5, 7.8);
-
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 1.3, 0);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = 0.4;
-    this.controls.maxDistance = 14;
-    this.controls.addEventListener('change', () => this.invalidate());
-    this.controls.addEventListener('start', () => {
-      this.#tween = null; // the user takes over from any camera move in progress
-    });
+    this.controls = new WalkControls(this.camera, this.renderer.domElement);
 
     new ResizeObserver(() => this.#resize()).observe(container);
     this.#resize();
@@ -98,36 +88,44 @@ export class SceneManager {
   }
 
   /**
-   * Flies the camera to look squarely at a region of the room, far enough back to
-   * fit `width` on screen. Orbiting continues around the new centre afterward.
+   * Stands the viewer at a room layout's starting point and fits movement to its floor.
+   * @param {ReturnType<import('../bookshelves/shelfLayout.js').layoutBookshelves>} layout
+   */
+  enterRoom({ start, walkBounds }) {
+    this.#walkBounds = walkBounds;
+    this.controls.setBounds(walkBounds);
+    this.controls.jumpTo(start.position, start.lookAt);
+    this.invalidate();
+  }
+
+  /**
+   * Walks the viewer to look squarely at a region of the room, far enough back to
+   * fit `width` on screen, or as far as the aisle allows. Walking continues from there.
    */
   focusOn({ center, facing, width }) {
     const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
     const fitVertical = (width * 0.55) / Math.tan(halfFov);
-    const distance = Math.max(0.8, fitVertical / Math.min(1, this.camera.aspect));
+    const wanted = Math.max(MIN_FOCUS_DISTANCE, fitVertical / Math.min(1, this.camera.aspect));
+    const standAt = (distance) => ({
+      x: center.x + facing.x * distance,
+      z: center.z + facing.z * distance,
+    });
 
-    const target = new THREE.Vector3(center.x, center.y, center.z);
-    const position = target.clone().add(new THREE.Vector3(facing.x, 0, facing.z).multiplyScalar(distance));
-    position.y += distance * 0.06;
-    this.#clampToRoom(position);
+    let distance = wanted;
+    let foundFloor = false;
+    for (let d = MIN_FOCUS_DISTANCE; d <= wanted; d += FOCUS_SEARCH_STEP) {
+      const { x, z } = standAt(d);
+      if (isWalkable(x, z, this.#walkBounds)) {
+        distance = d;
+        foundFloor = true;
+      } else if (foundFloor) {
+        break;
+      }
+    }
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    this.#tween = {
-      elapsed: 0,
-      duration: reduceMotion ? 0 : FOCUS_DURATION_S,
-      fromPosition: this.camera.position.clone(),
-      fromTarget: this.controls.target.clone(),
-      toPosition: position,
-      toTarget: target,
-    };
+    this.controls.flyTo({ ...standAt(distance), y: EYE_HEIGHT }, center, reduceMotion ? 0 : FOCUS_DURATION_S);
     this.invalidate();
-  }
-
-  #clampToRoom(point) {
-    const limit = ROOM_SIZE / 2 - WALL_MARGIN;
-    point.x = THREE.MathUtils.clamp(point.x, -limit, limit);
-    point.y = THREE.MathUtils.clamp(point.y, WALL_MARGIN, ROOM_HEIGHT - WALL_MARGIN);
-    point.z = THREE.MathUtils.clamp(point.z, -limit, limit);
   }
 
   #resize() {
@@ -139,28 +137,11 @@ export class SceneManager {
     this.invalidate();
   }
 
-  #stepTween(delta) {
-    const tween = this.#tween;
-    if (!tween) return;
-    tween.elapsed += delta;
-    const progress = tween.duration > 0 ? Math.min(1, tween.elapsed / tween.duration) : 1;
-    const eased = easeInOut(progress);
-    this.camera.position.lerpVectors(tween.fromPosition, tween.toPosition, eased);
-    this.controls.target.lerpVectors(tween.fromTarget, tween.toTarget, eased);
-    if (progress === 1) this.#tween = null;
-    this.invalidate();
-  }
-
   #frame() {
     this.#clock.update();
     const delta = Math.min(this.#clock.getDelta(), 0.1);
 
-    this.#stepTween(delta);
-    this.controls.update(); // needed each frame for damping; fires 'change' if the camera moved
-    // Orbit controls know nothing about walls. They read the camera's position back
-    // on the next update, so clamping here is enough to keep it inside the room.
-    this.#clampToRoom(this.controls.target);
-    this.#clampToRoom(this.camera.position);
+    if (this.controls.update(delta)) this.#needsRender = true;
 
     for (const callback of this.#frameCallbacks) {
       if (callback(delta)) this.#needsRender = true;

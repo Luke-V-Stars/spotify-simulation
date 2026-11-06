@@ -25,6 +25,7 @@ export class AlbumArtLoader {
     this.#canvas.width = layered.width;
     this.#canvas.height = layered.height;
     this.#ctx = this.#canvas.getContext('2d', { willReadFrequently: true });
+    this.#ctx.imageSmoothingQuality = 'high'; // covers are downloaded larger than they're stored
 
     for (let i = 0; i < CONCURRENCY; i++) this.#runWorker();
   }

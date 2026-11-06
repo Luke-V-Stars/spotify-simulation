@@ -6,14 +6,14 @@
 
 import { AuthClient, AuthExpiredError } from './auth/authClient.js';
 import { buildBookshelves, shelfFocusView } from './bookshelves/bookshelfGenerator.js';
-import { ROOM_SIZE } from './bookshelves/shelfLayout.js';
+import { layoutBookshelves } from './bookshelves/shelfLayout.js';
 import { planBookshelves } from './bookshelves/shelfPlanner.js';
 import { SongInteractions } from './interactions/songInteractions.js';
 import { buildRoom } from './scene/room.js';
 import { SceneManager } from './scene/sceneManager.js';
 import { SpotifyApiClient } from './spotify/apiClient.js';
 import { createDemoLibrary, DemoPlayback } from './spotify/demoLibrary.js';
-import { fetchLibrary } from './spotify/libraryService.js';
+import { fetchAssembledShelves, fetchLibrary, TOP_SONGS_ID } from './spotify/libraryService.js';
 import { SpotifyPlayback } from './spotify/playbackService.js';
 import { NowPlayingBar } from './ui/nowPlayingBar.js';
 import { ShelfDrawer } from './ui/shelfDrawer.js';
@@ -22,6 +22,11 @@ import { showToast } from './ui/toast.js';
 import { WelcomeOverlay } from './ui/welcomeOverlay.js';
 import { PlayingGlow } from './vinyl/playingGlow.js';
 import { VinylRecords } from './vinyl/vinylRecords.js';
+import { buildWallPlaques } from './vinyl/wallPlaques.js';
+
+/** Size of the room shown behind the welcome screen, before the library has loaded. */
+const WELCOME_ROOM_SHELVES = 16;
+const PLAQUE_COUNT = 5;
 
 const AUTH_ERROR_MESSAGES = {
   access_denied: 'Spotify access was declined. Connect again whenever you\'re ready.',
@@ -37,15 +42,25 @@ const welcome = new WelcomeOverlay({
 
 /** Builds the room's contents for a library and connects them to playback and the UI. */
 function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
-  const shelves = buildBookshelves(sceneManager.scene, sceneManager.renderer, planBookshelves(playlists));
+  const plannedShelves = planBookshelves(playlists);
+  const layout = layoutBookshelves(plannedShelves.length);
+  buildRoom(sceneManager.scene, sceneManager.renderer, layout);
+  const shelves = buildBookshelves(sceneManager.scene, sceneManager.renderer, plannedShelves, layout);
+  sceneManager.enterRoom(layout);
   sceneManager.refreshShadows();
-
-  // The default viewpoint sits where freestanding rows stand, so start in the open centre.
-  const isFreestanding = (shelf) => Math.max(Math.abs(shelf.x), Math.abs(shelf.z)) < ROOM_SIZE / 2 - 1;
-  if (shelves.some(isFreestanding)) sceneManager.camera.position.set(1.8, 2.3, 2.3);
 
   const vinyl = new VinylRecords(sceneManager.scene, sceneManager.renderer, shelves);
   const glow = new PlayingGlow(sceneManager.scene, vinyl);
+
+  // The plaques show the top of the top songs shelf, so each is one of that shelf's records.
+  const topSongsShelf = shelves.find((shelf) => shelf.playlist.id === TOP_SONGS_ID);
+  const plaqueRecords = topSongsShelf
+    ? topSongsShelf.tracks.slice(0, PLAQUE_COUNT).map((_, slot) => vinyl.recordAt(topSongsShelf, slot))
+    : [];
+  const plaques = buildWallPlaques(sceneManager.scene, sceneManager.renderer, plaqueRecords, layout.roomSize, () =>
+    sceneManager.invalidate(),
+  );
+
   sceneManager.onFrame((delta) => {
     const changed = vinyl.update(delta);
     glow.update();
@@ -70,7 +85,7 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
         playback.toggle().catch(reportFailure);
       } else {
         requestedRecord = record;
-        playback.playTrack(record.track, record.shelf.playlist).catch(reportFailure);
+        playback.playTrack(record.track, record.shelf.playlist, record.shelf.tracks).catch(reportFailure);
       }
     },
     onClose: () => {
@@ -114,6 +129,7 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
   new SongInteractions({
     sceneManager,
     shelves,
+    plaques,
     vinyl,
     onRecordClick: (record) => {
       songPanel.open(record);
@@ -135,10 +151,15 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
   welcome.hide();
 }
 
-function reportUnreadablePlaylists(playlists) {
+function reportUnreadableShelves(playlists, assembled) {
   const restricted = playlists.filter((playlist) => playlist.status === 'restricted').length;
   const failed = playlists.filter((playlist) => playlist.status === 'failed').length;
   const notes = [];
+  if (assembled.needsReconnect) {
+    notes.push('Sign out and connect Spotify again to add your Liked Songs, top songs and suggestions.');
+  } else if (assembled.failed > 0) {
+    notes.push('Your Liked Songs, top songs or suggestions could not all be loaded. Reload to retry.');
+  }
   if (restricted > 0) {
     notes.push(
       `Spotify only shares songs from playlists you own or collaborate on, so ${restricted} followed ${restricted === 1 ? 'playlist is an empty shelf' : 'playlists are empty shelves'}.`,
@@ -159,14 +180,18 @@ async function startSpotifySession(sceneManager) {
     welcome.showProgress(`Pulling records from ${loaded} of ${total} playlists…`, total ? loaded / total : 0);
   });
 
-  openRoom(sceneManager, playlists, new SpotifyPlayback(api, getToken), {
+  welcome.showProgress('Adding your Liked Songs, top songs and suggestions…');
+  const assembled = await fetchAssembledShelves(api, playlists);
+
+  // These go first, so Liked Songs is at the far end of the rows, ahead of the playlists.
+  openRoom(sceneManager, [...assembled.shelves, ...playlists], new SpotifyPlayback(api, getToken), {
     demoMode: false,
     onSignOut: async () => {
       await auth.logout();
       window.location.assign('/');
     },
   });
-  reportUnreadablePlaylists(playlists);
+  reportUnreadableShelves(playlists, assembled);
 }
 
 function startDemoSession(sceneManager) {
@@ -190,7 +215,9 @@ async function main() {
   let sceneManager;
   try {
     sceneManager = new SceneManager(document.getElementById('scene-root'));
-    buildRoom(sceneManager.scene, sceneManager.renderer);
+    const welcomeRoom = layoutBookshelves(WELCOME_ROOM_SHELVES);
+    buildRoom(sceneManager.scene, sceneManager.renderer, welcomeRoom);
+    sceneManager.enterRoom(welcomeRoom);
   } catch (error) {
     console.error(error);
     welcome.showChoices({ canConnect: false });

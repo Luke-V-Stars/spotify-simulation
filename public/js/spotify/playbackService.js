@@ -6,7 +6,7 @@
  * no longer exposes the subscription level on the user profile.
  *
  * SpotifyPlayback and DemoPlayback (demoLibrary.js) share one interface:
- *   start(), playTrack(track, playlist), toggle(), next(), previous(), setVolume(v)
+ *   start(), playTrack(track, playlist, shelfTracks), toggle(), next(), previous(), setVolume(v)
  *   onState(cb), where cb gets a PlaybackState or null when nothing is playing
  *   onError(cb), where cb gets a user-facing message, and { fatal: true } if
  *     playback can never work in this session
@@ -26,6 +26,16 @@
 const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
 const PLAYER_NAME = 'Vinyl Listening Room';
 const READY_TIMEOUT_MS = 15_000;
+
+/**
+ * What to ask Spotify to play. A real playlist plays as itself, so next and previous follow
+ * it. A shelf the app assembled has no URI, so it plays as a list of its shelf's songs.
+ */
+export function playbackRequest(track, playlist, shelfTracks = [track]) {
+  if (playlist?.uri) return { context_uri: playlist.uri, offset: { uri: track.uri } };
+  const uris = shelfTracks.filter((candidate) => !candidate.isLocal).map((candidate) => candidate.uri);
+  return { uris, offset: { uri: track.uri } };
+}
 
 /** Loads the SDK script once, resolving with the global `Spotify` namespace. */
 function loadSdk() {
@@ -127,13 +137,11 @@ export class SpotifyPlayback {
    * Plays a song within its playlist so next/previous keep moving along the shelf.
    * Must be called from a click handler: browsers only allow audio after a user gesture.
    */
-  async playTrack(track, playlist) {
+  async playTrack(track, playlist, shelfTracks) {
     // Runs synchronously, before any await, to stay inside the click's user gesture.
     this.#player?.activateElement();
     await this.#whenDeviceReady();
-    const body = playlist?.uri
-      ? { context_uri: playlist.uri, offset: { uri: track.uri } }
-      : { uris: [track.uri] };
+    const body = playbackRequest(track, playlist, shelfTracks);
     await this.#api.put(`/me/player/play?device_id=${encodeURIComponent(this.#deviceId)}`, body);
   }
 

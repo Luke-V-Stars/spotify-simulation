@@ -4,12 +4,17 @@
  * All names and artwork here are generated, none refer to real releases.
  */
 
+import { TOP_SONGS_ID } from './libraryService.js';
+
 const WORDS_A = ['Amber', 'Velvet', 'Slow', 'Midnight', 'Paper', 'Hollow', 'Golden', 'Quiet', 'Copper', 'Salt', 'Distant', 'Ember'];
 const WORDS_B = ['Rooms', 'Harbor', 'Static', 'Orchard', 'Signal', 'Tides', 'Letters', 'Lanterns', 'Motel', 'Satellites', 'Dust', 'Rivers'];
 const ARTISTS = ['The Night Clerks', 'Ana Morrow', 'Low Atlas', 'Fennel & Finch', 'Kaito Rivers', 'Ember Parade', 'Juno Vale', 'Soft Machinery'];
 
 /** Includes the cases worth exercising: exact and over-capacity shelves, and an empty playlist. */
 const DEMO_PLAYLISTS = [
+  ['Liked Songs', 136],
+  ['Your Top Songs', 50, TOP_SONGS_ID],
+  ['Suggested For You', 50],
   ['The Whole Collection', 500],
   ['Late Night Jazz', 50],
   ['Road Trip', 137],
@@ -70,7 +75,7 @@ function buildAlbum(random) {
 export function createDemoLibrary() {
   const random = seededRandom(20261105);
 
-  return DEMO_PLAYLISTS.map(([name, count], playlistIndex) => {
+  return DEMO_PLAYLISTS.map(([name, count, id], playlistIndex) => {
     const tracks = [];
     let album = buildAlbum(random);
     for (let i = 0; i < count; i++) {
@@ -88,7 +93,7 @@ export function createDemoLibrary() {
         isLocal: false,
       });
     }
-    return { id: `demo-${playlistIndex}`, uri: `demo:playlist:${playlistIndex}`, name, tracks, status: 'ok' };
+    return { id: id ?? `demo-${playlistIndex}`, uri: `demo:playlist:${playlistIndex}`, name, tracks, status: 'ok' };
   });
 }
 

@@ -1,8 +1,10 @@
 /**
- * All vinyl records in the room, drawn as one InstancedMesh with a custom shader.
+ * Every record in the room: a square album sleeve holding a vinyl disc, all drawn as
+ * one InstancedMesh with a custom shader. The disc stays hidden until its record is
+ * hovered, selected or playing, when it slides out of the sleeve.
  *
  * Performance design, aimed at libraries of thousands of songs:
- * - One draw call, with each record's cover selected from a texture array.
+ * - One draw call, with each sleeve's cover selected from a texture array.
  * - Hover, selection, spin and glow are uniforms compared against gl_InstanceID
  *   in the shader, so changing state uploads no per-instance data at all.
  * - Lighting is a cheap fixed golden approximation rather than the scene's lights.
@@ -10,42 +12,72 @@
 
 import * as THREE from 'three';
 import { recordCenter, SHELF } from '../bookshelves/shelfGeometry.js';
+import { ROOM_HEIGHT } from '../bookshelves/shelfLayout.js';
 import { LayeredTexture, maxTextureLayers } from '../scene/layeredTexture.js';
 import { AlbumArtLoader } from './albumArtLoader.js';
 
-const ART_SIZE_PX = 64; // matches Spotify's smallest album image
+const ART_SIZE_PX = 128;
+/** Very large libraries get smaller covers, so artwork memory stays bounded. */
+const ART_SIZE_PX_CROWDED = 64;
+const CROWDED_COVER_COUNT = 512;
 const MAX_ART_LAYERS = 2048;
-const RECORD_THICKNESS = 0.004;
+const SLEEVE_THICKNESS = 0.006;
 const DISC_SEGMENTS = 32;
 const SPIN_RADIANS_PER_SECOND = 0.7; // deliberately slower than a real 33⅓ rpm
 const NO_INSTANCE = -1;
 
-/** A flat disc of radius 1 facing +Z, with a thin edge. No back: it's never seen. */
-function createDiscGeometry() {
-  const positions = [0, 0, 0];
-  const normals = [0, 0, 1];
-  const indices = [];
+const PART_COVER = 0;
+const PART_SLEEVE_EDGE = 1;
+const PART_DISC = 2;
 
+/**
+ * One record, in units of the sleeve's half-width and thickness: a square sleeve
+ * facing +Z with thin edges, and a disc of radius 1 tucked just behind its cover.
+ * Nothing has a back, since it's never seen.
+ */
+function createRecordGeometry() {
+  const positions = [];
+  const normals = [];
+  const parts = [];
+  const indices = [];
+  const addVertex = (x, y, z, nx, ny, nz, part) => {
+    positions.push(x, y, z);
+    normals.push(nx, ny, nz);
+    parts.push(part);
+    return parts.length - 1;
+  };
+
+  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const cover = corners.map(([x, y]) => addVertex(x, y, 0, 0, 0, 1, PART_COVER));
+  indices.push(cover[0], cover[1], cover[2], cover[0], cover[2], cover[3]);
+
+  corners.forEach(([ax, ay], i) => {
+    const [bx, by] = corners[(i + 1) % corners.length];
+    // Going counter-clockwise around the sleeve, outward is to the right of each edge.
+    const nx = (by - ay) / 2;
+    const ny = (ax - bx) / 2;
+    const frontA = addVertex(ax, ay, 0, nx, ny, 0, PART_SLEEVE_EDGE);
+    const backA = addVertex(ax, ay, -1, nx, ny, 0, PART_SLEEVE_EDGE);
+    const backB = addVertex(bx, by, -1, nx, ny, 0, PART_SLEEVE_EDGE);
+    const frontB = addVertex(bx, by, 0, nx, ny, 0, PART_SLEEVE_EDGE);
+    indices.push(frontA, backA, backB, frontA, backB, frontB);
+  });
+
+  const discZ = -1.5;
+  const hub = addVertex(0, 0, discZ, 0, 0, 1, PART_DISC);
+  const rimStart = parts.length;
   for (let i = 0; i < DISC_SEGMENTS; i++) {
     const angle = (i / DISC_SEGMENTS) * Math.PI * 2;
-    const x = Math.cos(angle);
-    const y = Math.sin(angle);
-    positions.push(x, y, 0); // face rim: vertex 1 + i
-    normals.push(0, 0, 1);
-    positions.push(x, y, 0, x, y, -1); // edge, with its own outward normals
-    normals.push(x, y, 0, x, y, 0);
+    addVertex(Math.cos(angle), Math.sin(angle), discZ, 0, 0, 1, PART_DISC);
   }
-
   for (let i = 0; i < DISC_SEGMENTS; i++) {
-    const current = 1 + i * 3;
-    const next = 1 + ((i + 1) % DISC_SEGMENTS) * 3;
-    indices.push(0, current, next);
-    indices.push(current + 1, current + 2, next + 1, next + 1, current + 2, next + 2);
+    indices.push(hub, rimStart + i, rimStart + ((i + 1) % DISC_SEGMENTS));
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('aPart', new THREE.Float32BufferAttribute(parts, 1));
   geometry.setIndex(indices);
   return geometry;
 }
@@ -57,45 +89,62 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uSpin;
 
   attribute float aLayer;
+  attribute float aPart;
 
-  varying vec2 vDisc;    // position on the record, turning with it (for the artwork)
-  varying vec2 vFixed;   // position on the record, not turning (for reflections)
+  varying vec2 vFace;    // position on the part, turning with it (for artwork)
+  varying vec2 vFixed;   // position on the part, not turning (for reflections)
   varying vec3 vNormal;
   varying vec3 vWorld;
   varying float vLayer;
+  varying float vPart;
   varying vec3 vState;   // x: hovered, y: selected, z: playing
+
+  const float DISC_SIZE = 0.95;     // keeps the disc's rim hidden behind the sleeve
+  const float PEEK_SLIDE = 0.45;    // a hovered record's disc shows a little
+  const float FULL_SLIDE = 1.15;    // a selected or playing record's disc is most of the way out
+  const float LIFT = 0.28;          // sleeve widths toward the viewer, clearing its neighbours
 
   void main() {
     float hovered = gl_InstanceID == uHoverId ? 1.0 : 0.0;
     float selected = gl_InstanceID == uSelectedId ? 1.0 : 0.0;
     float playing = gl_InstanceID == uPlayingId ? 1.0 : 0.0;
+    bool isDisc = aPart > 1.5;
 
     vec3 local = position;
-    vec3 localNormal = normal;
-    if (playing > 0.5) {
+    if (isDisc && playing > 0.5) {
       float c = cos(uSpin);
       float s = sin(uSpin);
-      mat2 rotation = mat2(c, -s, s, c);
-      local.xy = rotation * local.xy;
-      localNormal.xy = rotation * localNormal.xy;
+      local.xy = mat2(c, -s, s, c) * local.xy;
     }
 
-    vDisc = position.xy;
+    vFace = position.xy;
     vFixed = local.xy;
     vLayer = aLayer;
+    vPart = aPart;
     vState = vec3(hovered, selected, playing);
 
-    // A highlighted record grows slightly and slides out of the shelf toward the viewer.
-    float lifted = max(hovered, selected);
+    float pulledOut = max(selected, playing);
+    float slide = max(hovered * PEEK_SLIDE, pulledOut * FULL_SLIDE);
+    if (isDisc) {
+      // A disc still inside its sleeve can't be seen, so skip drawing it altogether.
+      if (slide == 0.0) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+      }
+      local.xy = local.xy * DISC_SIZE + vec2(slide, 0.0);
+    }
+
+    // A highlighted record grows slightly and comes out of the shelf toward the viewer.
+    float lifted = max(hovered, pulledOut);
     local.xy *= 1.0 + 0.05 * lifted;
     vec3 outward = normalize(instanceMatrix[2].xyz);
-    float recordSize = length(instanceMatrix[0].xyz);
+    float sleeveSize = length(instanceMatrix[0].xyz);
 
     vec4 world = modelMatrix * instanceMatrix * vec4(local, 1.0);
-    world.xyz += outward * recordSize * 0.28 * lifted;
+    world.xyz += outward * sleeveSize * LIFT * lifted;
 
     vWorld = world.xyz;
-    vNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * localNormal);
+    vNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * world;
   }
 `;
@@ -105,25 +154,39 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uGlow;
   uniform vec3 uLightPosition;
 
-  varying vec2 vDisc;
+  varying vec2 vFace;
   varying vec2 vFixed;
   varying vec3 vNormal;
   varying vec3 vWorld;
   varying float vLayer;
+  varying float vPart;
   varying vec3 vState;
 
-  // Larger than a real record's label, so the album cover is recognizable on the shelf.
-  const float LABEL_RADIUS = 0.56;
+  const float LABEL_RADIUS = 0.42;
   const vec3 GOLD = vec3(1.0, 0.66, 0.3);
+  const vec3 CARD_EDGE = vec3(0.17, 0.13, 0.09);
 
-  void main() {
-    float radius = length(vDisc);
+  /** Album artwork across a square whose corners are at +-1. Pixels are stored top row first: flip V. */
+  vec3 artAt(vec2 face) {
+    vec2 uv = face * 0.5 + 0.5;
+    return texture(uArt, vec3(uv.x, 1.0 - uv.y, vLayer)).rgb;
+  }
+
+  vec3 shadeCover(float light, vec3 normal) {
+    // Corners and edges of old sleeves look a little worn and darker.
+    float edge = max(abs(vFace.x), abs(vFace.y));
+    vec3 color = artAt(vFace) * light * (1.0 - 0.28 * smoothstep(0.9, 1.0, edge));
+
+    // A faint gloss from the room's light, like laminated card.
+    vec3 toViewer = normalize(cameraPosition - vWorld);
+    vec3 halfway = normalize(normalize(uLightPosition - vWorld) + toViewer);
+    color += GOLD * pow(max(dot(normal, halfway), 0.0), 48.0) * 0.1;
+    return color;
+  }
+
+  vec3 shadeDisc(float light) {
+    float radius = length(vFace);
     float pixel = fwidth(radius);
-
-    vec3 normal = normalize(vNormal);
-    vec3 toLight = normalize(uLightPosition - vWorld);
-    float diffuse = max(dot(normal, toLight), 0.0);
-    float light = 0.5 + 0.75 * diffuse;
 
     // Vinyl: fine grooves, faded out before they get small enough to shimmer.
     float groove = 0.5 + 0.5 * sin(radius * 260.0);
@@ -137,10 +200,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     vinyl += GOLD * fan * 0.2;
     vinyl *= light;
 
-    // Album artwork fills the centre label. Pixels are stored top row first: flip V.
-    vec2 artUv = vDisc / LABEL_RADIUS * 0.5 + 0.5;
-    vec3 art = texture(uArt, vec3(artUv.x, 1.0 - artUv.y, vLayer)).rgb * light;
-
+    // Album artwork fills the centre label.
+    vec3 art = artAt(vFace / LABEL_RADIUS) * light;
     float labelMask = 1.0 - smoothstep(LABEL_RADIUS - pixel, LABEL_RADIUS + pixel, radius);
     vec3 color = mix(vinyl, art, labelMask);
 
@@ -148,18 +209,27 @@ const FRAGMENT_SHADER = /* glsl */ `
     float ring = 1.0 - smoothstep(0.0, pixel * 1.5, abs(radius - LABEL_RADIUS) - 0.006);
     color = mix(color, GOLD * 0.65 * light, ring * 0.8);
     float hole = 1.0 - smoothstep(0.028 - pixel, 0.028 + pixel, radius);
-    color = mix(color, vec3(0.01), hole);
+    return mix(color, vec3(0.01), hole);
+  }
+
+  void main() {
+    vec3 normal = normalize(vNormal);
+    vec3 toLight = normalize(uLightPosition - vWorld);
+    float diffuse = max(dot(normal, toLight), 0.0);
+    float light = 0.62 + 0.75 * diffuse;
+
+    bool isDisc = vPart > 1.5;
+    vec3 color = isDisc ? shadeDisc(light) : vPart > 0.5 ? CARD_EDGE * light : shadeCover(light, normal);
 
     // Highlights: a bright outer rim and a warm lift, strongest on hover.
-    float rim = smoothstep(0.86, 1.0, radius);
+    float rim = isDisc ? smoothstep(0.86, 1.0, length(vFace)) : smoothstep(0.92, 1.0, max(abs(vFace.x), abs(vFace.y)));
     float highlight = max(vState.x, vState.y * 0.6);
-    color += GOLD * highlight * (0.06 + rim * 0.75);
+    color += GOLD * highlight * (0.04 + rim * 0.75);
     color *= 1.0 + 0.2 * highlight;
 
-    // The playing record glows softly from its rim, with a gentle lift on the label.
+    // The playing record glows softly from its rim.
     float glow = vState.z * uGlow;
-    color += GOLD * glow * (rim * 0.95 + 0.05);
-    color *= 1.0 + 0.16 * glow * labelMask;
+    color += GOLD * glow * (rim * 0.95 + 0.04);
 
     gl_FragColor = vec4(color, 1.0);
     #include <tonemapping_fragment>
@@ -204,7 +274,7 @@ export class VinylRecords {
     };
 
     const totalRecords = shelves.reduce((sum, shelf) => sum + shelf.recordCount, 0);
-    const geometry = createDiscGeometry();
+    const geometry = createRecordGeometry();
     const layers = new Float32Array(totalRecords);
     geometry.setAttribute('aLayer', new THREE.InstancedBufferAttribute(layers, 1));
 
@@ -215,7 +285,7 @@ export class VinylRecords {
       uPlayingId: { value: NO_INSTANCE },
       uSpin: { value: 0 },
       uGlow: { value: 0 },
-      uLightPosition: { value: new THREE.Vector3(0, 4.4, 0) },
+      uLightPosition: { value: new THREE.Vector3(0, ROOM_HEIGHT - 0.3, 0) },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -229,7 +299,7 @@ export class VinylRecords {
 
     // Each record: shelf placement, then position on the shelf, lean, and size.
     const lean = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -SHELF.recordLean);
-    const size = new THREE.Vector3(SHELF.recordRadius, SHELF.recordRadius, RECORD_THICKNESS);
+    const size = new THREE.Vector3(SHELF.sleeveHalf, SHELF.sleeveHalf, SLEEVE_THICKNESS);
     const local = new THREE.Matrix4();
     const world = new THREE.Matrix4();
     const position = new THREE.Vector3();
@@ -252,9 +322,10 @@ export class VinylRecords {
       });
     }
 
+    const artSize = layerByUrl.size > CROWDED_COVER_COUNT ? ART_SIZE_PX_CROWDED : ART_SIZE_PX;
     this.#layered = new LayeredTexture(renderer, {
-      width: ART_SIZE_PX,
-      height: ART_SIZE_PX,
+      width: artSize,
+      height: artSize,
       layers: layerByUrl.size + 1,
       fill: [150, 112, 66, 255],
     });

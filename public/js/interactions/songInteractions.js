@@ -1,16 +1,17 @@
 /**
- * Mouse and touch interaction with the shelves: hover highlights a record, click
- * selects one, and clicking a shelf outside any record focuses the camera on it.
+ * Mouse and touch interaction with the shelves and wall plaques: hover highlights a record,
+ * click selects one, and clicking a shelf outside any record focuses the camera on it.
  */
 
-import { pickRecord } from './recordPicker.js';
+import { pickPlaque, pickRecord } from './recordPicker.js';
 
-/** Movement past this many pixels is an orbit drag, not a click. */
+/** Movement past this many pixels is a drag to walk or look, not a click. */
 const CLICK_TOLERANCE_PX = 5;
 
 export class SongInteractions {
   #scene;
   #shelves;
+  #plaques;
   #vinyl;
   #onRecordClick;
   #onShelfClick;
@@ -23,13 +24,15 @@ export class SongInteractions {
    * @param {object} options
    * @param {import('../scene/sceneManager.js').SceneManager} options.sceneManager
    * @param {Array} options.shelves placed shelves
+   * @param {Array} options.plaques wall plaques, each holding the record it shows
    * @param {import('../vinyl/vinylRecords.js').VinylRecords} options.vinyl
    * @param {(record: object) => void} options.onRecordClick
    * @param {(shelf: object) => void} options.onShelfClick
    */
-  constructor({ sceneManager, shelves, vinyl, onRecordClick, onShelfClick }) {
+  constructor({ sceneManager, shelves, plaques, vinyl, onRecordClick, onShelfClick }) {
     this.#scene = sceneManager;
     this.#shelves = shelves;
+    this.#plaques = plaques;
     this.#vinyl = vinyl;
     this.#onRecordClick = onRecordClick;
     this.#onShelfClick = onShelfClick;
@@ -48,14 +51,18 @@ export class SongInteractions {
   }
 
   #pick(clientX, clientY) {
-    const hit = pickRecord(this.#scene.screenRay(clientX, clientY), this.#shelves);
-    if (!hit) return null;
+    const ray = this.#scene.screenRay(clientX, clientY);
+    const hit = pickRecord(ray, this.#shelves);
+    if (!hit) {
+      const record = pickPlaque(ray, this.#plaques);
+      return record ? { shelf: record.shelf, record } : null;
+    }
     const shelf = this.#shelves[hit.shelfIndex];
     return { shelf, record: hit.slotIndex === null ? null : this.#vinyl.recordAt(shelf, hit.slotIndex) };
   }
 
   #handleMove(event) {
-    // Touch has no hover, and while a button is held the user is orbiting.
+    // Touch has no hover, and while a button is held the user is walking or looking.
     if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
     this.#pointer = { x: event.clientX, y: event.clientY };
   }

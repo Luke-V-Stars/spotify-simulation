@@ -20,6 +20,8 @@ const REFRESH_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 export const SCOPES = [
   'playlist-read-private', // list and read the user's private playlists
   'playlist-read-collaborative', // include collaborative playlists
+  'user-library-read', // the Liked Songs shelf
+  'user-top-read', // the top songs and top artists shelves
   'streaming', // required by the Web Playback SDK
   'user-read-email', // required by the Web Playback SDK
   'user-read-private', // required by the Web Playback SDK

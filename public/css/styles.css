@@ -54,7 +54,7 @@ body {
 
 #scene-root canvas {
   display: block;
-  /* Hand touch gestures to the orbit controls rather than scrolling the page. */
+  /* Hand touch gestures to the walking controls rather than scrolling the page. */
   touch-action: none;
 }
 

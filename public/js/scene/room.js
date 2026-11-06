@@ -1,19 +1,27 @@
 /**
- * The enclosed listening room: oak floor, matte black walls, dark ceiling and
- * ambient golden lighting. Everything here is static and uses few draw calls.
+ * The enclosed listening room: oak floor, walnut-panelled walls and warm golden
+ * lights recessed into the ceiling, all sized to the library. Everything here is
+ * static and uses few draw calls.
  */
 
 import * as THREE from 'three';
-import { ROOM_HEIGHT, ROOM_SIZE } from '../bookshelves/shelfLayout.js';
+import { ROOM_HEIGHT } from '../bookshelves/shelfLayout.js';
 
+const ROOM_OBJECT_NAME = 'room';
 const GOLD = 0xffc27a;
-const FLOOR_TILE_METRES = 2.4; // with 12 plank rows per tile, planks are 20 cm wide
-const PENDANT_POSITIONS = [
-  [-5.5, -5.5],
-  [5.5, -5.5],
-  [-5.5, 5.5],
-  [5.5, 5.5],
-];
+const WOOD_TILE_METRES = 2.4; // with 12 plank rows per tile, planks are 20 cm wide
+const FIXTURE_SPACING = 4; // roughly, in metres
+const FIXTURE_RADIUS = 0.11;
+const FIXTURE_TRIM_WIDTH = 0.03;
+const FIXTURE_RECESS = 0.12; // how far each light sits above the ceiling
+const FILL_LIGHT_INSET = 0.275; // fill light distance from the centre, as a share of the room's width
+
+const LIGHT_DECAY = 1.5;
+const LIGHTING_REFERENCE_ROOM_SIZE = 14; // the size the light strengths below were tuned at
+const MIN_LIGHT_STRENGTH = 0.75; // the walls of a small room are mostly bare, so they need more
+
+const OAK = { hue: 30, saturation: 26, lightness: 31 };
+const WALNUT_PANEL = { hue: 22, saturation: 30, lightness: 25 };
 
 function seededRandom(seed) {
   let state = seed;
@@ -23,8 +31,8 @@ function seededRandom(seed) {
   };
 }
 
-/** Paints a tileable oak plank texture. Procedural, so the project ships no image files. */
-function createOakTexture(renderer) {
+/** Paints a tileable wooden plank texture. Procedural, so the project ships no image files. */
+function createWoodTexture(renderer, { hue: baseHue, saturation: baseSaturation, lightness: baseLightness }) {
   const size = 1024;
   const rows = 12;
   const canvas = document.createElement('canvas');
@@ -42,9 +50,9 @@ function createOakTexture(renderer) {
       if (size - (x + length) < size * 0.2) length = size - x;
 
       // Gold light adds plenty of warmth, so the wood itself stays fairly neutral.
-      const hue = 31 + random() * 5;
-      const saturation = 30 + random() * 7;
-      const lightness = 37 + random() * 6;
+      const hue = baseHue + random() * 5;
+      const saturation = baseSaturation + random() * 7;
+      const lightness = baseLightness + random() * (baseLightness / 6);
       ctx.fillStyle = `hsl(${hue} ${saturation}% ${lightness}%)`;
       ctx.fillRect(x, y, length, rowHeight);
 
@@ -84,101 +92,164 @@ function createOakTexture(renderer) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(ROOM_SIZE / FLOOR_TILE_METRES, ROOM_SIZE / FLOOR_TILE_METRES);
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return texture;
 }
 
-function addSurfaces(scene, renderer) {
+/**
+ * Where the ceiling lights go along each axis, evenly spaced. The count is always odd,
+ * so one light sits at the room's centre, where the shadow-casting light is.
+ */
+function fixtureAxis(roomSize) {
+  const perSide = 2 * Math.round(roomSize / (2 * FIXTURE_SPACING)) + 1;
+  return Array.from({ length: perSide }, (_, i) => ((i + 0.5) / perSide - 0.5) * roomSize);
+}
+
+function addSurfaces(room, renderer, roomSize) {
+  const floorTexture = createWoodTexture(renderer, OAK);
+  floorTexture.repeat.set(roomSize / WOOD_TILE_METRES, roomSize / WOOD_TILE_METRES);
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
-    new THREE.MeshStandardMaterial({ map: createOakTexture(renderer), roughness: 0.52, metalness: 0 }),
+    new THREE.PlaneGeometry(roomSize, roomSize),
+    new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.52, metalness: 0 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
-  scene.add(floor);
+  room.add(floor);
 
+  // The ceiling has a real hole for each light, so the lights look set into it.
+  const half = roomSize / 2;
+  const ceilingShape = new THREE.Shape()
+    .moveTo(-half, -half)
+    .lineTo(half, -half)
+    .lineTo(half, half)
+    .lineTo(-half, half)
+    .closePath();
+  const axis = fixtureAxis(roomSize);
+  for (const x of axis) {
+    for (const z of axis) {
+      ceilingShape.holes.push(new THREE.Path().absarc(x, z, FIXTURE_RADIUS, 0, Math.PI * 2, true));
+    }
+  }
   const ceiling = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
-    new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 0.92 }),
+    new THREE.ShapeGeometry(ceilingShape, 24),
+    // No light points up here, so a little emissive stands in for what bounces off the floor.
+    new THREE.MeshStandardMaterial({ color: 0xb8a080, emissive: 0x3a281a, roughness: 0.9 }),
   );
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = ROOM_HEIGHT;
-  scene.add(ceiling);
+  room.add(ceiling);
+
+  // Turned a quarter so the planks stand upright as panelling. The turn swaps which
+  // repeat applies to which direction: x now runs up the wall.
+  const panelTexture = createWoodTexture(renderer, WALNUT_PANEL);
+  panelTexture.rotation = Math.PI / 2;
+  panelTexture.repeat.set(ROOM_HEIGHT / WOOD_TILE_METRES, roomSize / WOOD_TILE_METRES);
 
   // A plane is one-sided, so each wall only exists when seen from inside the room.
-  const wallGeometry = new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT);
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 0.97 });
+  const wallGeometry = new THREE.PlaneGeometry(roomSize, ROOM_HEIGHT);
+  const wallMaterial = new THREE.MeshStandardMaterial({ map: panelTexture, roughness: 0.7 });
   for (let i = 0; i < 4; i++) {
     const angle = (i * Math.PI) / 2;
     const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-    wall.position.set(-Math.sin(angle) * (ROOM_SIZE / 2), ROOM_HEIGHT / 2, -Math.cos(angle) * (ROOM_SIZE / 2));
+    wall.position.set(-Math.sin(angle) * (roomSize / 2), ROOM_HEIGHT / 2, -Math.cos(angle) * (roomSize / 2));
     wall.rotation.y = angle;
     wall.receiveShadow = true;
-    scene.add(wall);
+    room.add(wall);
   }
 }
 
-function addLights(scene) {
-  scene.add(new THREE.HemisphereLight(0xffd7a3, 0x3a2412, 0.55));
+/**
+ * A handful of real lights, placed at some of the ceiling fixtures. Every fixture glows,
+ * but each extra real light costs every pixel in the room, so there are only five.
+ */
+function addLights(room, roomSize) {
+  // Light fades with distance, so it stays even only if a bigger room gets stronger lights.
+  const strength = Math.max(MIN_LIGHT_STRENGTH, (roomSize / LIGHTING_REFERENCE_ROOM_SIZE) ** LIGHT_DECAY);
+
+  // The ground colour stands in for light bouncing off the floor, which lifts the ceiling.
+  room.add(new THREE.HemisphereLight(0xffd7a3, 0x8a5a33, 2.1));
 
   // One central light casts the room's shadows. See SceneManager for why they're static.
-  const central = new THREE.SpotLight(GOLD, 75, 0, 1.38, 0.9, 1.4);
-  central.position.set(0, ROOM_HEIGHT - 0.15, 0);
+  const central = new THREE.SpotLight(GOLD, 16 * strength, 0, 1.45, 0.9, LIGHT_DECAY);
+  central.position.set(0, ROOM_HEIGHT - 0.02, 0);
   central.target.position.set(0, 0, 0);
   central.castShadow = true;
   central.shadow.mapSize.set(2048, 2048);
   central.shadow.bias = -0.0006;
   central.shadow.normalBias = 0.02;
-  central.shadow.camera.near = 0.5;
-  central.shadow.camera.far = 24;
-  scene.add(central, central.target);
+  central.shadow.camera.near = 0.3;
+  central.shadow.camera.far = roomSize + 4;
+  room.add(central, central.target);
 
-  for (const [x, z] of PENDANT_POSITIONS) {
-    const light = new THREE.PointLight(GOLD, 22, 0, 1.7);
-    light.position.set(x, ROOM_HEIGHT - 1.35, z);
-    scene.add(light);
+  // Pointing straight down, these light the room without lighting the ceiling around them.
+  const axis = fixtureAxis(roomSize);
+  const nearest = (target) => axis.reduce((best, x) => (Math.abs(x - target) < Math.abs(best - target) ? x : best));
+  const offset = nearest(roomSize * FILL_LIGHT_INSET);
+  for (const [x, z] of [[-offset, -offset], [offset, -offset], [-offset, offset], [offset, offset]]) {
+    const light = new THREE.SpotLight(GOLD, 9 * strength, 0, 1.3, 0.8, LIGHT_DECAY);
+    light.position.set(x, ROOM_HEIGHT - 0.02, z);
+    light.target.position.set(x, 0, z);
+    room.add(light, light.target);
   }
 }
 
-/** Brass pendants and a glowing cove line: visible sources for the golden light. */
-function addFixtures(scene) {
-  const brass = new THREE.MeshStandardMaterial({ color: 0x9c7434, metalness: 0.75, roughness: 0.38 });
-  const bulbGlow = new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(2.4) });
-  // Kept below 1 so tone mapping leaves the thin line gold rather than clipping it to white.
-  const coveGlow = new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(0.8) });
-
-  const cordGeometry = new THREE.CylinderGeometry(0.008, 0.008, 1, 6);
-  const shadeGeometry = new THREE.SphereGeometry(0.26, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-  const bulbGeometry = new THREE.SphereGeometry(0.1, 16, 12);
-
-  for (const [x, z] of PENDANT_POSITIONS) {
-    const y = ROOM_HEIGHT - 1.2;
-    const cord = new THREE.Mesh(cordGeometry, brass);
-    cord.scale.y = 1.2;
-    cord.position.set(x, ROOM_HEIGHT - 0.6, z);
-
-    const shade = new THREE.Mesh(shadeGeometry, brass);
-    shade.position.set(x, y, z);
-
-    const bulb = new THREE.Mesh(bulbGeometry, bulbGlow);
-    bulb.position.set(x, y - 0.03, z);
-    scene.add(cord, shade, bulb);
-  }
-
-  const coveGeometry = new THREE.BoxGeometry(ROOM_SIZE - 0.1, 0.025, 0.025);
-  for (let i = 0; i < 4; i++) {
-    const angle = (i * Math.PI) / 2;
-    const cove = new THREE.Mesh(coveGeometry, coveGlow);
-    const distance = ROOM_SIZE / 2 - 0.05;
-    cove.position.set(-Math.sin(angle) * distance, ROOM_HEIGHT - 0.06, -Math.cos(angle) * distance);
-    cove.rotation.y = angle;
-    scene.add(cove);
-  }
+/** One copy of a mesh at each fixture, so all the fixtures together cost one draw call per part. */
+function instanceAtFixtures(geometry, material, positions, y) {
+  const mesh = new THREE.InstancedMesh(geometry, material, positions.length);
+  const matrix = new THREE.Matrix4();
+  positions.forEach(([x, z], index) => mesh.setMatrixAt(index, matrix.makeTranslation(x, y, z)));
+  return mesh;
 }
 
-export function buildRoom(scene, renderer) {
-  addSurfaces(scene, renderer);
-  addLights(scene);
-  addFixtures(scene);
+/** Recessed downlights: a brass trim around each hole, a shaft, and a glowing lamp at the top. */
+function addFixtures(room, roomSize) {
+  const axis = fixtureAxis(roomSize);
+  const positions = axis.flatMap((x) => axis.map((z) => [x, z]));
+  const faceDown = (geometry) => geometry.rotateX(Math.PI / 2);
+
+  const trim = instanceAtFixtures(
+    faceDown(new THREE.RingGeometry(FIXTURE_RADIUS, FIXTURE_RADIUS + FIXTURE_TRIM_WIDTH, 32)),
+    new THREE.MeshStandardMaterial({ color: 0x9c7434, metalness: 0.5, roughness: 0.45 }),
+    positions,
+    ROOM_HEIGHT - 0.002,
+  );
+  const shaft = instanceAtFixtures(
+    new THREE.CylinderGeometry(FIXTURE_RADIUS, FIXTURE_RADIUS, FIXTURE_RECESS, 32, 1, true),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(1.1), side: THREE.BackSide }),
+    positions,
+    ROOM_HEIGHT + FIXTURE_RECESS / 2,
+  );
+  const lamp = instanceAtFixtures(
+    faceDown(new THREE.CircleGeometry(FIXTURE_RADIUS, 32)),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(2.4) }),
+    positions,
+    ROOM_HEIGHT + FIXTURE_RECESS,
+  );
+  room.add(trim, shaft, lamp);
+}
+
+function disposeRoom(room) {
+  room.traverse((object) => {
+    object.geometry?.dispose();
+    object.material?.map?.dispose();
+    object.material?.dispose();
+    object.dispose?.(); // lights and instanced meshes hold GPU resources of their own
+  });
+  room.removeFromParent();
+}
+
+/**
+ * Builds the room for a layout, replacing any room already in the scene.
+ * @param {ReturnType<import('../bookshelves/shelfLayout.js').layoutBookshelves>} layout
+ */
+export function buildRoom(scene, renderer, { roomSize }) {
+  const previous = scene.getObjectByName(ROOM_OBJECT_NAME);
+  if (previous) disposeRoom(previous);
+
+  const room = new THREE.Group();
+  room.name = ROOM_OBJECT_NAME;
+  addSurfaces(room, renderer, roomSize);
+  addLights(room, roomSize);
+  addFixtures(room, roomSize);
+  scene.add(room);
 }

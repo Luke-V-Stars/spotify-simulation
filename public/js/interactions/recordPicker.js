@@ -20,7 +20,7 @@ function intersectShelfBox(ox, oy, oz, dx, dy, dz) {
 
   const bounds = [
     [ox, dx, -SHELF.width / 2, SHELF.width / 2],
-    [oy, dy, 0, SHELF.height],
+    [oy, dy, 0, SHELF.totalHeight],
     [oz, dz, -SHELF.depth / 2, SHELF.depth / 2],
   ];
 
@@ -85,6 +85,25 @@ export function pickRecord(ray, shelves) {
   return { shelfIndex: best.shelfIndex, slotIndex };
 }
 
+/**
+ * Finds the wall plaque a ray points at. Call this only when no shelf was hit: plaques
+ * hang on a wall, so any shelf along the ray stands in front of them.
+ * @param {{ox,oy,oz,dx,dy,dz}} ray world-space ray
+ * @param {Array<{x,y,z,width,height,record}>} plaques all on the wall facing +Z
+ * @returns the plaque's record, or null
+ */
+export function pickPlaque(ray, plaques) {
+  for (const { x, y, z, width, height, record } of plaques) {
+    if (ray.dz >= 0) return null; // the wall faces +Z, so only rays heading toward -Z can reach it
+    const t = (z - ray.oz) / ray.dz;
+    if (t < 0) continue;
+    const hitX = ray.ox + ray.dx * t;
+    const hitY = ray.oy + ray.dy * t;
+    if (Math.abs(hitX - x) <= width / 2 && Math.abs(hitY - y) <= height / 2) return record;
+  }
+  return null;
+}
+
 /** Follows the ray to the plane the records stand on and maps that point to a slot. */
 function findSlot(local, hit, recordCount) {
   const t = (SHELF.recordZ - local.oz) / local.dz;
@@ -104,8 +123,8 @@ function findSlot(local, hit, recordCount) {
   const slotIndex = rowFromTop * SHELF.columns + column;
   if (slotIndex >= recordCount) return null;
 
-  // The grid cell is square but a record is round, so corners don't count.
+  // The grid cell is slightly larger than the sleeve, so the gaps around it don't count.
   const center = recordCenter(slotIndex);
-  const inCircle = Math.hypot(x - center.x, y - center.y) <= SHELF.recordRadius;
-  return inCircle ? slotIndex : null;
+  const inSleeve = Math.abs(x - center.x) <= SHELF.sleeveHalf && Math.abs(y - center.y) <= SHELF.sleeveHalf;
+  return inSleeve ? slotIndex : null;
 }

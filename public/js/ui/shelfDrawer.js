@@ -5,6 +5,7 @@ const byId = (id) => document.getElementById(id);
 function describePlaylist(playlist, shelfCount) {
   if (playlist.status === 'restricted') return 'Songs not shared by Spotify';
   if (playlist.status === 'failed') return 'Songs could not be loaded';
+  if (playlist.status === 'reconnect') return 'Sign out and connect again to load these';
   const songs = `${playlist.tracks.length} ${playlist.tracks.length === 1 ? 'song' : 'songs'}`;
   return shelfCount > 1 ? `${songs} · ${shelfCount} shelves` : songs;
 }
