@@ -1,0 +1,491 @@
+/* Warm, low-light UI that sits on top of the 3D room. */
+
+:root {
+  --ink: #f6ead6;
+  --ink-muted: #bda98a;
+  --gold: #e8bd78;
+  --gold-strong: #f4cf92;
+  --surface: rgba(21, 15, 10, 0.88);
+  --surface-solid: #17100a;
+  --line: rgba(232, 189, 120, 0.22);
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --edge: 16px;
+  --now-playing-height: 76px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #050403;
+  color: var(--ink);
+  font: 15px/1.45 var(--sans);
+}
+
+/* Without this the browser's [hidden] rule loses to the display values set below. */
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold-strong);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+#scene-root {
+  position: fixed;
+  inset: 0;
+}
+
+#scene-root canvas {
+  display: block;
+  /* Hand touch gestures to the orbit controls rather than scrolling the page. */
+  touch-action: none;
+}
+
+/* Buttons */
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.primary-button,
+.secondary-button {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.primary-button {
+  border: 1px solid var(--gold-strong);
+  background: var(--gold);
+  color: #24170a;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--gold-strong);
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.secondary-button:hover {
+  border-color: var(--gold);
+}
+
+.pill-button {
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+}
+
+.pill-button:hover,
+.pill-button[aria-expanded="true"] {
+  border-color: var(--gold);
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.icon-button:hover {
+  background: rgba(232, 189, 120, 0.16);
+}
+
+/* Top bar */
+
+.top-bar {
+  position: fixed;
+  top: var(--edge);
+  left: var(--edge);
+  right: var(--edge);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* The bar spans the room view: only its buttons should catch the mouse. */
+  pointer-events: none;
+}
+
+.top-bar > button {
+  pointer-events: auto;
+}
+
+#sign-out {
+  margin-left: auto;
+}
+
+.mode-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(232, 189, 120, 0.16);
+  color: var(--gold-strong);
+  font-size: 13px;
+}
+
+.control-hint {
+  flex: 1;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  text-align: center;
+  text-shadow: 0 1px 4px #000;
+}
+
+/* Playlist drawer */
+
+.drawer {
+  position: fixed;
+  top: 68px;
+  left: var(--edge);
+  bottom: var(--edge);
+  width: min(320px, calc(100vw - 2 * var(--edge)));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+}
+
+.drawer-title {
+  margin: 0;
+  padding: 16px 18px 10px;
+  font: 500 19px var(--serif);
+  color: var(--gold-strong);
+}
+
+.shelf-list {
+  flex: 1;
+  margin: 0;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.shelf-button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.shelf-button:hover {
+  background: rgba(232, 189, 120, 0.13);
+}
+
+.shelf-name {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shelf-meta {
+  display: block;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+/* Song information panel */
+
+.song-panel {
+  position: fixed;
+  top: var(--edge);
+  right: var(--edge);
+  max-height: calc(100vh - 2 * var(--edge));
+  width: 320px;
+  padding: 18px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+}
+
+body.has-now-playing .song-panel {
+  max-height: calc(100vh - var(--now-playing-height) - 3 * var(--edge));
+}
+
+.song-close {
+  position: absolute;
+  top: 26px;
+  right: 26px;
+  background: rgba(10, 7, 4, 0.72);
+}
+
+.song-close:hover {
+  background: rgba(10, 7, 4, 0.92);
+}
+
+.song-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  background: #2a1c10;
+  object-fit: cover;
+}
+
+.song-title {
+  margin: 14px 0 10px;
+  font: 500 23px/1.2 var(--serif);
+  overflow-wrap: anywhere;
+}
+
+.song-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  margin: 0 0 16px;
+}
+
+.song-details dt {
+  color: var(--ink-muted);
+}
+
+.song-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.song-note {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+/* Now playing bar */
+
+.now-playing {
+  position: fixed;
+  left: 50%;
+  bottom: var(--edge);
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 2 * var(--edge)));
+  height: var(--now-playing-height);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 8px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+}
+
+.now-art {
+  flex: none;
+  width: 58px;
+  height: 58px;
+  border-radius: 6px;
+  background: #2a1c10;
+}
+
+.now-art:not([src]) {
+  visibility: hidden;
+}
+
+.now-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.now-text > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.now-text span {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.now-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.now-toggle {
+  background: var(--gold);
+  color: #24170a;
+}
+
+.now-toggle:hover {
+  background: var(--gold-strong);
+}
+
+.now-volume input {
+  width: 92px;
+  accent-color: var(--gold);
+}
+
+/* Welcome and loading overlay */
+
+.welcome {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--edge);
+  background: rgba(5, 4, 3, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.welcome-card {
+  width: min(420px, 100%);
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.welcome-card h1 {
+  margin: 0 0 8px;
+  font: 500 32px/1.15 var(--serif);
+  color: var(--gold-strong);
+}
+
+.welcome-lede {
+  margin: 0 0 22px;
+  color: var(--ink-muted);
+}
+
+.welcome-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.welcome-message {
+  margin: 16px 0 0;
+  font-size: 14px;
+}
+
+.welcome-progress {
+  margin-top: 4px;
+}
+
+.progress-label {
+  margin: 0 0 8px;
+}
+
+.welcome-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--gold);
+}
+
+/* Toast */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--now-playing-height) + 2 * var(--edge));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(560px, calc(100vw - 2 * var(--edge)));
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-solid);
+  font-size: 14px;
+}
+
+/* Responsive: small screens get a bottom sheet in place of the side panel. */
+
+@media (max-width: 900px) {
+  .control-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --edge: 10px;
+  }
+
+  .song-panel {
+    top: auto;
+    left: var(--edge);
+    right: var(--edge);
+    bottom: var(--edge);
+    width: auto;
+    max-height: 62vh;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    column-gap: 14px;
+    align-items: start;
+  }
+
+  body.has-now-playing .song-panel {
+    bottom: calc(var(--now-playing-height) + 2 * var(--edge));
+    max-height: 56vh;
+  }
+
+  .song-title {
+    margin-top: 0;
+    padding-right: 34px;
+    font-size: 19px;
+  }
+
+  .song-close {
+    top: 12px;
+    right: 12px;
+  }
+
+  .song-details,
+  .song-panel .primary-button,
+  .song-note {
+    grid-column: 1 / -1;
+  }
+
+  .song-details {
+    margin-top: 12px;
+  }
+
+  .now-volume {
+    display: none;
+  }
+}

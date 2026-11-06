@@ -1,0 +1,3 @@
+node_modules/
+# Real credentials live here. Never commit this file.
+.env

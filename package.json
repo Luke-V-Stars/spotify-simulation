@@ -1,0 +1,17 @@
+{
+  "name": "spotify-simulation",
+  "version": "0.1.0",
+  "description": "A 3D listening room where your Spotify playlists become shelves of vinyl records.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  }
+}
