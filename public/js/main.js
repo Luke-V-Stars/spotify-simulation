@@ -13,7 +13,7 @@ import { buildRoom } from './scene/room.js';
 import { SceneManager } from './scene/sceneManager.js';
 import { SpotifyApiClient } from './spotify/apiClient.js';
 import { createDemoLibrary, DemoPlayback } from './spotify/demoLibrary.js';
-import { fetchAssembledShelves, fetchLibrary, TOP_SONGS_ID } from './spotify/libraryService.js';
+import { fetchAssembledShelves, fetchLibrary, libraryFailureMessage, TOP_SONGS_ID } from './spotify/libraryService.js';
 import { SpotifyPlayback } from './spotify/playbackService.js';
 import { NowPlayingBar } from './ui/nowPlayingBar.js';
 import { ShelfDrawer } from './ui/shelfDrawer.js';
@@ -255,9 +255,7 @@ async function main() {
   } catch (error) {
     console.error(error);
     welcome.showChoices({ canConnect: status.configured });
-    welcome.showMessage(
-      error instanceof AuthExpiredError ? error.message : `Could not load your library: ${error.message}`,
-    );
+    welcome.showMessage(error instanceof AuthExpiredError ? error.message : libraryFailureMessage(error));
   }
 }
 

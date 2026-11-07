@@ -37,7 +37,7 @@ Open the app at `127.0.0.1`, not `localhost`: Spotify no longer accepts `localho
 These come from Spotify's [February 2026 changes](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide) and apply to apps in Development Mode:
 
 - **Followed playlists appear as empty shelves.** Spotify only returns songs for playlists the user owns or collaborates on. The shelf and name still appear, and the app explains why they're empty. Apps with Extended Quota aren't affected.
-- **The app owner needs Premium**, and a new app is limited to 5 users, who must be added in the dashboard.
+- **The app owner needs Premium**, and a new app is limited to 5 users, who must be added in the dashboard. Anyone else can log in, but the app then shows an error asking them to get added.
 - **Playback requires Premium for each listener**, plus a browser that supports EME (desktop Chrome, Edge or Firefox). Anyone else can still browse the shelves and song details.
 
 Choosing **Connect Spotify** always asks for a Spotify login. To do that it first ends the browser's Spotify session, which also signs that browser out of other Spotify sites such as the web player.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SpotifyApiClient, SpotifyApiError } from '../public/js/spotify/apiClient.js';
-import { fetchAssembledShelves, fetchLibrary, mapPlaylistEntry } from '../public/js/spotify/libraryService.js';
+import { fetchAssembledShelves, fetchLibrary, libraryFailureMessage, mapPlaylistEntry } from '../public/js/spotify/libraryService.js';
 import { DemoPlayback } from '../public/js/spotify/demoLibrary.js';
 import { mapSdkState, playbackRequest } from '../public/js/spotify/playbackService.js';
 import { formatDuration, formatReleaseDate } from '../public/js/ui/format.js';
@@ -109,6 +109,17 @@ test('a 403 marks only that playlist as restricted, and other errors as failed',
   assert.equal(mine.tracks.length, 1);
   assert.equal(followed.status, 'restricted');
   assert.equal(broken.status, 'failed');
+});
+
+test('a 403 listing playlists points at the approved user list, and other failures keep their reason', async () => {
+  const failureFor = (response) =>
+    fetchLibrary(fakeApi([['/me/playlists', () => response]])).catch(libraryFailureMessage);
+
+  assert.match(await failureFor(new Response('User not registered', { status: 403 })), /approved user list/);
+  assert.equal(
+    await failureFor(jsonResponse({ error: { message: 'Not found' } }, 404)),
+    'Could not load your library: Not found',
+  );
 });
 
 test('a session failure during song loading aborts instead of showing empty shelves', async () => {

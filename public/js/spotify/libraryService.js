@@ -123,6 +123,17 @@ async function forEachLimited(items, limit, worker) {
 }
 
 /**
+ * What to tell the user when fetchLibrary throws. A 403 can only come from listing the
+ * playlists, and Development Mode answers that way for accounts not on the app's user list.
+ */
+export function libraryFailureMessage(error) {
+  if (error instanceof SpotifyApiError && error.status === 403) {
+    return 'Spotify refused to share this account\'s library. The account probably isn\'t on this app\'s approved user list yet. Ask the app owner to add the email address on this Spotify account, then connect again.';
+  }
+  return `Could not load your library: ${error.message}`;
+}
+
+/**
  * Retrieves every playlist and its songs. A failure on one playlist is recorded on
  * that playlist and doesn't stop the others; failing to list playlists does throw.
  *
