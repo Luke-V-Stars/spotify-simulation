@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { shelfBoards } from '../public/js/bookshelves/bookshelfGenerator.js';
 import { recordCenter, SHELF } from '../public/js/bookshelves/shelfGeometry.js';
+import { BoxBatch } from '../public/js/scene/boxBatch.js';
 import { layoutBookshelves, layoutPlaques } from '../public/js/bookshelves/shelfLayout.js';
 import { planBookshelves } from '../public/js/bookshelves/shelfPlanner.js';
 import { pickPlaque, pickRecord } from '../public/js/interactions/recordPicker.js';
@@ -163,6 +165,93 @@ test('facing far enough up, nothing on screen is below eye level', () => {
   const halfFov = (55 / 2) * (Math.PI / 180);
   assert.equal(isBelowEyeLevel(-1, halfFov - 0.01, 55), true, 'the horizon is still just on screen');
   assert.equal(isBelowEyeLevel(-1, halfFov + 0.01, 55), false, 'the horizon has gone off the bottom');
+});
+
+for (const detailed of [true, false]) {
+  test(`shelf parts stay within the shelf's measured size (${detailed ? 'detailed' : 'simple'})`, () => {
+    const extent = (axis, sign) =>
+      Math.max(...shelfBoards(detailed).map(({ box }) => sign * box[axis] + box[axis + 3] / 2));
+    assert.ok(Math.abs(extent(1, 1) - SHELF.totalHeight) < 1e-9, 'the top is the measured height');
+    assert.ok(Math.abs(extent(1, -1)) < 1e-9, 'stands on the floor');
+    assert.ok(extent(2, -1) <= SHELF.depth / 2 + 1e-9, 'nothing passes through the shelf standing behind it');
+    assert.ok(extent(0, 1) * 2 < SHELF.width + 0.06, 'nothing reaches the shelf alongside it');
+  });
+}
+
+test('nothing on the shelf covers more than the bottom edge of a record', () => {
+  const { y } = recordCenter(49);
+  const sleeveBottom = y - SHELF.sleeveHalf;
+  for (const { box } of shelfBoards()) {
+    const inFrontOfRecords = box[2] + box[5] / 2 > SHELF.recordZ;
+    const crossesCentre = box[3] > SHELF.width / 2;
+    if (inFrontOfRecords && crossesCentre && box[1] < y) {
+      assert.ok(box[1] + box[4] / 2 < sleeveBottom + 0.02, `part at height ${box[1]} rises in front of the record`);
+    }
+  }
+});
+
+/** Turns a batch's triangles into [a, b, c] vertex positions. */
+function trianglesOf({ positions, indices }) {
+  const vertex = (index) => positions.slice(index * 3, index * 3 + 3);
+  const triangles = [];
+  for (let i = 0; i < indices.length; i += 3) triangles.push([indices[i], indices[i + 1], indices[i + 2]].map(vertex));
+  return triangles;
+}
+
+test('a softened box is closed, faces outward and keeps its exact size', () => {
+  const batch = new BoxBatch();
+  const center = [1, 2, 3];
+  batch.add([...center, 2, 0.5, 0.2], { chamfer: 0.02 });
+  const { data } = batch;
+  assert.equal(data.indices.length / 3, 44);
+
+  // Every edge of a closed surface is used by exactly two triangles, once in each direction.
+  const edges = new Map();
+  for (let i = 0; i < data.indices.length; i += 3) {
+    const triangle = data.indices.slice(i, i + 3);
+    triangle.forEach((from, corner) => {
+      const key = `${from}>${triangle[(corner + 1) % 3]}`;
+      edges.set(key, (edges.get(key) ?? 0) + 1);
+    });
+  }
+  for (const [key, count] of edges) {
+    const [from, to] = key.split('>');
+    assert.equal(count, 1, `edge ${key} is repeated`);
+    assert.equal(edges.get(`${to}>${from}`), 1, `edge ${key} has no partner`);
+  }
+
+  for (const [a, b, c] of trianglesOf(data)) {
+    const u = [0, 1, 2].map((i) => b[i] - a[i]);
+    const v = [0, 1, 2].map((i) => c[i] - a[i]);
+    const normal = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const outward = [0, 1, 2].reduce((sum, i) => sum + normal[i] * ((a[i] + b[i] + c[i]) / 3 - center[i]), 0);
+    assert.ok(outward > 0, 'a triangle faces inward');
+  }
+
+  const xs = data.positions.filter((_, i) => i % 3 === 0);
+  assert.equal(Math.min(...xs), 0);
+  assert.equal(Math.max(...xs), 2);
+});
+
+test('a box with no chamfer is six plain faces', () => {
+  const batch = new BoxBatch();
+  batch.add([0, 0, 0, 1, 1, 1]);
+  assert.equal(batch.data.indices.length / 3, 12);
+});
+
+test('wood grain runs along a board and stays in proportion, whatever its size', () => {
+  const batch = new BoxBatch();
+  batch.add([0, 0, 0, 2, 0.1, 0.5], { tile: 1 });
+  const { positions, normals, uvs } = batch.data;
+  const top = [];
+  for (let i = 0; i < normals.length / 3; i++) {
+    if (normals[i * 3 + 1] === 1) top.push({ x: positions[i * 3], z: positions[i * 3 + 2], u: uvs[i * 2], v: uvs[i * 2 + 1] });
+  }
+  assert.equal(top.length, 4);
+  for (const { x, z, u, v } of top) {
+    assert.equal(u, x, 'grain follows the long side, at one repeat per metre');
+    assert.equal(v, z);
+  }
 });
 
 test('the name area fits within the shelf and clicking its header finds the shelf', () => {

@@ -175,7 +175,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   vec3 shadeCover(float light, vec3 normal) {
     // Corners and edges of old sleeves look a little worn and darker.
     float edge = max(abs(vFace.x), abs(vFace.y));
-    vec3 color = artAt(vFace) * light * (1.0 - 0.28 * smoothstep(0.9, 1.0, edge));
+    // The strip under the shelf above lights the top of each sleeve more than the bottom.
+    float stripLight = mix(0.88, 1.1, vFace.y * 0.5 + 0.5);
+    vec3 color = artAt(vFace) * light * stripLight * (1.0 - 0.28 * smoothstep(0.9, 1.0, edge));
 
     // A faint gloss from the room's light, like laminated card.
     vec3 toViewer = normalize(cameraPosition - vWorld);

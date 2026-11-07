@@ -77,7 +77,7 @@ public/js/
   main.js                Connects all the modules below
   auth/                  Browser side of authentication
   spotify/               Web API client, library loading, Playback SDK, demo mode
-  scene/                 Renderer, camera, walking controls, the room, texture arrays
+  scene/                 Renderer, camera, walking controls, the room, painted textures, texture arrays
   bookshelves/           Which shelves exist, the room's size, where they stand, their meshes
   vinyl/                 Instanced sleeves and discs, shader, album art streaming, glow, wall plaques
   interactions/          Hover and click handling, and picking
@@ -100,6 +100,7 @@ The room is designed so that cost grows slowly with library size:
 - **Picking does no raycasting against triangles.** `recordPicker.js` intersects the ray with each shelf's box and computes the grid cell, so its cost depends on shelf count rather than song count.
 - **Rendering on demand.** A still room issues no draw calls at all.
 - **Static shadows.** The shadow map is drawn once, since shelves don't move.
+- **Simpler shelves when there are many.** Past 200 shelves, each drops its softened edges and small decorative parts, going from about 900 triangles to about 150.
 - **Streamed artwork.** Covers load in the background using Spotify's 300px images, scaled down, and upload in batches. The song panel uses the full-size image.
 
 ## Tests

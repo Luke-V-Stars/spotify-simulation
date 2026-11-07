@@ -1,99 +1,90 @@
 /**
- * The enclosed listening room: oak floor, walnut-panelled walls and warm golden
- * lights recessed into the ceiling, all sized to the library. Everything here is
- * static and uses few draw calls.
+ * The enclosed listening room, sized to the library: a polished oak floor, walnut
+ * panelling below a fabric-covered wall, a beamed ceiling and recessed downlights.
+ * Everything here is static and uses few draw calls.
  */
 
 import * as THREE from 'three';
 import { ROOM_HEIGHT } from '../bookshelves/shelfLayout.js';
+import { BoxBatch } from './boxBatch.js';
+import {
+  createFabricTextures,
+  createWoodTextures,
+  paintedTexture,
+  tileTextures,
+  walnutTextures,
+  withOwnTiling,
+} from './proceduralTextures.js';
 
 const ROOM_OBJECT_NAME = 'room';
-const GOLD = 0xffc27a;
-const WOOD_TILE_METRES = 2.4; // with 12 plank rows per tile, planks are 20 cm wide
+const LAMP_GLOW = 0xffc27a;
+const LIGHT_COLOR = 0xffdcb4; // warm, but pale enough to leave the wood its own colour
+
+const FLOOR_TILE_METRES = 2.1; // with 14 plank rows per tile, planks are 15 cm wide
+const PANEL_TILE_METRES = 2.4;
+const FABRIC_TILE_METRES = 1;
+const TRIM_TILE_METRES = 1.2;
+
 const FIXTURE_SPACING = 4; // roughly, in metres
 const FIXTURE_RADIUS = 0.11;
 const FIXTURE_TRIM_WIDTH = 0.03;
 const FIXTURE_RECESS = 0.12; // how far each light sits above the ceiling
 const FILL_LIGHT_INSET = 0.275; // fill light distance from the centre, as a share of the room's width
 
+/** Panelling stops just under the plaques, whose frames reach down to 0.9 m. */
+const WAINSCOT_HEIGHT = 0.84;
+const RAIL_HEIGHT = 0.04;
+const BASEBOARD_HEIGHT = 0.14;
+const STILE_WIDTH = 0.07;
+const STILE_SPACING = 1.2; // roughly, in metres
+const CROWN_HEIGHT = 0.1;
+const BEAM_WIDTH = 0.14;
+const BEAM_DEPTH = 0.1;
+
+const WASH_WIDTH = 3;
+const WASH_HEIGHT = 2.2;
+const WALL_EFFECT_OFFSET = 0.004; // keeps a lighting effect from flickering against its wall
+const SHADE_SPACING = 0.3; // metres between the vertices that carry corner shading
+
 const LIGHT_DECAY = 1.5;
 const LIGHTING_REFERENCE_ROOM_SIZE = 14; // the size the light strengths below were tuned at
 const MIN_LIGHT_STRENGTH = 0.75; // the walls of a small room are mostly bare, so they need more
+const SHADOW_MAP_SIZE = 4096; // drawn once and then reused, so this costs memory but no frame time
 
-const OAK = { hue: 30, saturation: 26, lightness: 31 };
-const WALNUT_PANEL = { hue: 22, saturation: 30, lightness: 25 };
+const ENVIRONMENT_INTENSITY = 0.55;
 
-function seededRandom(seed) {
-  let state = seed;
-  return () => {
-    state = (state * 1664525 + 1013904223) % 4294967296;
-    return state / 4294967296;
+const OAK = { hue: 30, saturation: 36, lightness: 30 };
+/** The room's wood is darker than the shelves. Panels are darker than their frames, which sets the frames apart. */
+const WOODWORK_TINT = 0xdcdcdc;
+const WALL_PANEL_TINT = 0x8c8c8c;
+const FABRIC = { hue: 150, saturation: 20, lightness: 30 };
+
+/** Painting takes a moment and rooms get rebuilt, so each texture is painted once and reused. */
+let paintedSurfaces = null;
+
+function roomTextures(renderer) {
+  paintedSurfaces ??= {
+    floor: createWoodTextures(renderer, OAK, { rows: 14 }),
+    panel: withOwnTiling(walnutTextures(renderer)),
+    fabric: createFabricTextures(renderer, FABRIC),
+    wash: paintedTexture(256, 256, paintWallWash),
   };
+  return paintedSurfaces;
 }
 
-/** Paints a tileable wooden plank texture. Procedural, so the project ships no image files. */
-function createWoodTexture(renderer, { hue: baseHue, saturation: baseSaturation, lightness: baseLightness }) {
-  const size = 1024;
-  const rows = 12;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const random = seededRandom(7);
-  const rowHeight = size / rows;
+/** Brightness that falls from 1 to `darkest` as a point nears a corner or edge, standing in for corner shadows. */
+const cornerShade = (distance, reach, darkest) =>
+  darkest + (1 - darkest) * THREE.MathUtils.smoothstep(distance, 0, reach);
 
-  for (let row = 0; row < rows; row++) {
-    const y = row * rowHeight;
-    let x = 0;
-    // Planks end exactly at the tile edge, so the seam reads as one more plank joint.
-    while (x < size) {
-      let length = size * (0.3 + random() * 0.45);
-      if (size - (x + length) < size * 0.2) length = size - x;
-
-      // Gold light adds plenty of warmth, so the wood itself stays fairly neutral.
-      const hue = baseHue + random() * 5;
-      const saturation = baseSaturation + random() * 7;
-      const lightness = baseLightness + random() * (baseLightness / 6);
-      ctx.fillStyle = `hsl(${hue} ${saturation}% ${lightness}%)`;
-      ctx.fillRect(x, y, length, rowHeight);
-
-      // Grain: long, slightly wavy lines of darker and lighter wood.
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, y, length, rowHeight);
-      ctx.clip();
-      for (let line = 0; line < 30; line++) {
-        const lineY = y + random() * rowHeight;
-        const wave = 1 + random() * 3.5;
-        const phase = random() * Math.PI * 2;
-        const dark = random() > 0.3;
-        ctx.strokeStyle = dark
-          ? `rgba(58, 32, 12, ${0.05 + random() * 0.16})`
-          : `rgba(236, 196, 140, ${0.03 + random() * 0.08})`;
-        ctx.lineWidth = 0.5 + random() * 1.4;
-        ctx.beginPath();
-        for (let px = x; px <= x + length; px += 24) {
-          const py = lineY + Math.sin((px / length) * Math.PI * 2 + phase) * wave;
-          if (px === x) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // Dark joint at the end of each plank.
-      ctx.fillStyle = 'rgba(24, 13, 6, 0.75)';
-      ctx.fillRect(x + length - 1.5, y, 1.5, rowHeight);
-      x += length;
-    }
-    ctx.fillStyle = 'rgba(24, 13, 6, 0.75)';
-    ctx.fillRect(0, y, size, 1.5);
+/** Stores a brightness at each vertex of a flat surface, given its position on that surface. */
+function shadePlane(geometry, shadeAt) {
+  const { position } = geometry.attributes;
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    colors.fill(shadeAt(position.getX(i), position.getY(i)), i * 3, i * 3 + 3);
   }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return texture;
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
 }
 
 /**
@@ -105,20 +96,35 @@ function fixtureAxis(roomSize) {
   return Array.from({ length: perSide }, (_, i) => ((i + 0.5) / perSide - 0.5) * roomSize);
 }
 
-function addSurfaces(room, renderer, roomSize) {
-  const floorTexture = createWoodTexture(renderer, OAK);
-  floorTexture.repeat.set(roomSize / WOOD_TILE_METRES, roomSize / WOOD_TILE_METRES);
+function addFloor(room, renderer, roomSize) {
+  const textures = roomTextures(renderer).floor;
+  tileTextures(textures, roomSize / FLOOR_TILE_METRES, roomSize / FLOOR_TILE_METRES);
+
+  const half = roomSize / 2;
+  const segments = Math.ceil(roomSize / SHADE_SPACING);
+  const geometry = shadePlane(new THREE.PlaneGeometry(roomSize, roomSize, segments, segments), (x, y) =>
+    cornerShade(half - Math.max(Math.abs(x), Math.abs(y)), 0.9, 0.5),
+  );
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(roomSize, roomSize),
-    new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.52, metalness: 0 }),
+    geometry,
+    new THREE.MeshStandardMaterial({
+      map: textures.map,
+      roughnessMap: textures.surface,
+      bumpMap: textures.surface,
+      bumpScale: 0.3,
+      roughness: 0.7,
+      vertexColors: true,
+    }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   room.add(floor);
+}
 
+function addCeiling(room, roomSize) {
   // The ceiling has a real hole for each light, so the lights look set into it.
   const half = roomSize / 2;
-  const ceilingShape = new THREE.Shape()
+  const shape = new THREE.Shape()
     .moveTo(-half, -half)
     .lineTo(half, -half)
     .lineTo(half, half)
@@ -127,35 +133,225 @@ function addSurfaces(room, renderer, roomSize) {
   const axis = fixtureAxis(roomSize);
   for (const x of axis) {
     for (const z of axis) {
-      ceilingShape.holes.push(new THREE.Path().absarc(x, z, FIXTURE_RADIUS, 0, Math.PI * 2, true));
+      shape.holes.push(new THREE.Path().absarc(x, z, FIXTURE_RADIUS, 0, Math.PI * 2, true));
     }
   }
   const ceiling = new THREE.Mesh(
-    new THREE.ShapeGeometry(ceilingShape, 24),
+    new THREE.ShapeGeometry(shape, 24),
     // No light points up here, so a little emissive stands in for what bounces off the floor.
-    new THREE.MeshStandardMaterial({ color: 0xb8a080, emissive: 0x3a281a, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x9c8a74, emissive: 0x120d09, roughness: 0.95 }),
   );
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = ROOM_HEIGHT;
   room.add(ceiling);
+}
 
-  // Turned a quarter so the planks stand upright as panelling. The turn swaps which
-  // repeat applies to which direction: x now runs up the wall.
-  const panelTexture = createWoodTexture(renderer, WALNUT_PANEL);
-  panelTexture.rotation = Math.PI / 2;
-  panelTexture.repeat.set(ROOM_HEIGHT / WOOD_TILE_METRES, roomSize / WOOD_TILE_METRES);
-
-  // A plane is one-sided, so each wall only exists when seen from inside the room.
-  const wallGeometry = new THREE.PlaneGeometry(roomSize, ROOM_HEIGHT);
-  const wallMaterial = new THREE.MeshStandardMaterial({ map: panelTexture, roughness: 0.7 });
+/** A plain panel for each of the four walls, one-sided so it only exists when seen from inside. */
+function addWallPanels(room, geometry, material, y, roomSize) {
   for (let i = 0; i < 4; i++) {
     const angle = (i * Math.PI) / 2;
-    const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-    wall.position.set(-Math.sin(angle) * (roomSize / 2), ROOM_HEIGHT / 2, -Math.cos(angle) * (roomSize / 2));
+    const wall = new THREE.Mesh(geometry, material);
+    wall.position.set(-Math.sin(angle) * (roomSize / 2), y, -Math.cos(angle) * (roomSize / 2));
     wall.rotation.y = angle;
     wall.receiveShadow = true;
     room.add(wall);
   }
+}
+
+function addWalls(room, renderer, roomSize) {
+  const half = roomSize / 2;
+  const widthSegments = Math.ceil(roomSize / SHADE_SPACING);
+  const upperHeight = ROOM_HEIGHT - WAINSCOT_HEIGHT;
+
+  // Turned a quarter so the grain runs upright. The turn swaps which repeat applies
+  // to which direction: x now runs up the wall.
+  const { panel, fabric } = roomTextures(renderer);
+  tileTextures(panel, WAINSCOT_HEIGHT / PANEL_TILE_METRES, roomSize / PANEL_TILE_METRES, Math.PI / 2);
+  const lowerGeometry = shadePlane(new THREE.PlaneGeometry(roomSize, WAINSCOT_HEIGHT, widthSegments, 3), (x, y) =>
+    cornerShade(half - Math.abs(x), 0.7, 0.5) * cornerShade(y + WAINSCOT_HEIGHT / 2, 0.35, 0.6),
+  );
+  addWallPanels(
+    room,
+    lowerGeometry,
+    new THREE.MeshStandardMaterial({
+      color: WALL_PANEL_TINT,
+      map: panel.map,
+      roughnessMap: panel.surface,
+      bumpMap: panel.surface,
+      roughness: 0.75,
+      vertexColors: true,
+    }),
+    WAINSCOT_HEIGHT / 2,
+    roomSize,
+  );
+
+  tileTextures(fabric, roomSize / FABRIC_TILE_METRES, upperHeight / FABRIC_TILE_METRES);
+  const upperGeometry = shadePlane(new THREE.PlaneGeometry(roomSize, upperHeight, widthSegments, 6), (x, y) =>
+    cornerShade(half - Math.abs(x), 0.7, 0.55) * cornerShade(upperHeight / 2 - y, 0.5, 0.65),
+  );
+  addWallPanels(
+    room,
+    upperGeometry,
+    new THREE.MeshStandardMaterial({
+      map: fabric.map,
+      roughnessMap: fabric.surface,
+      bumpMap: fabric.surface,
+      bumpScale: 0.15,
+      roughness: 1,
+      vertexColors: true,
+    }),
+    WAINSCOT_HEIGHT + upperHeight / 2,
+    roomSize,
+  );
+}
+
+/** Woodwork on the walls and ceiling: baseboard, panel frames, rail, crown moulding and beams. */
+function addWoodwork(room, renderer, roomSize) {
+  const half = roomSize / 2;
+  const undersideShade = (_, normal) => (normal[1] < -0.5 ? 0.85 : 1);
+  const batch = new BoxBatch();
+
+  const onEachWall = (along, y, out, sizeAlong, sizeY, sizeOut, chamfer) => {
+    for (const axis of ['x', 'z']) {
+      for (const sign of [-1, 1]) {
+        const distance = sign * (half - out - sizeOut / 2);
+        const box =
+          axis === 'z'
+            ? [along, y, distance, sizeAlong, sizeY, sizeOut]
+            : [distance, y, along, sizeOut, sizeY, sizeAlong];
+        batch.add(box, { chamfer, tile: TRIM_TILE_METRES, shade: undersideShade, grainOffset: [along * 0.37, sign * 0.21] });
+      }
+    }
+  };
+
+  onEachWall(0, BASEBOARD_HEIGHT / 2, 0, roomSize, BASEBOARD_HEIGHT, 0.022, 0.006);
+  onEachWall(0, BASEBOARD_HEIGHT + 0.012, 0, roomSize, 0.024, 0.012, 0.004);
+  onEachWall(0, WAINSCOT_HEIGHT + RAIL_HEIGHT / 2 - 0.01, 0, roomSize, RAIL_HEIGHT, 0.03, 0.008);
+  onEachWall(0, ROOM_HEIGHT - CROWN_HEIGHT / 2, 0, roomSize, CROWN_HEIGHT, 0.03, 0.006);
+  onEachWall(0, ROOM_HEIGHT - 0.02, 0, roomSize, 0.04, 0.055, 0.006);
+
+  const stiles = Math.round(roomSize / STILE_SPACING);
+  const stileHeight = WAINSCOT_HEIGHT - BASEBOARD_HEIGHT;
+  for (let i = 1; i < stiles; i++) {
+    const along = (i / stiles - 0.5) * roomSize;
+    onEachWall(along, BASEBOARD_HEIGHT + stileHeight / 2, 0, STILE_WIDTH, stileHeight, 0.014, 0.004);
+  }
+
+  // Beams fall halfway between the lights, so they never cross one. One set is slightly
+  // shallower, so the two sets' undersides aren't level and can't flicker where they cross.
+  const fixtures = fixtureAxis(roomSize);
+  const spacing = roomSize / fixtures.length;
+  for (let i = 1; i < fixtures.length; i++) {
+    const at = fixtures[i] - spacing / 2;
+    const beam = { chamfer: 0.012, tile: TRIM_TILE_METRES, shade: undersideShade };
+    batch.add([0, ROOM_HEIGHT - BEAM_DEPTH / 2, at, roomSize, BEAM_DEPTH, BEAM_WIDTH], { ...beam, grainOffset: [i * 0.31, 0] });
+    batch.add([at, ROOM_HEIGHT - BEAM_DEPTH / 2 + 0.006, 0, BEAM_WIDTH, BEAM_DEPTH - 0.012, roomSize], { ...beam, grainOffset: [i * 0.53, 0.4] });
+  }
+
+  const wood = walnutTextures(renderer);
+  const mesh = new THREE.Mesh(
+    batch.toGeometry(),
+    new THREE.MeshStandardMaterial({
+      color: WOODWORK_TINT,
+      map: wood.map,
+      roughnessMap: wood.surface,
+      roughness: 0.62,
+      vertexColors: true,
+    }),
+  );
+  mesh.receiveShadow = true;
+  room.add(mesh);
+}
+
+function paintWallWash(ctx, width, height) {
+  ctx.translate(width / 2, 0);
+  ctx.scale(1, height / (width / 2));
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, width / 2);
+  glow.addColorStop(0, 'rgba(255, 208, 155, 0.42)');
+  glow.addColorStop(0.45, 'rgba(255, 200, 140, 0.16)');
+  glow.addColorStop(1, 'rgba(255, 196, 130, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(-width / 2, 0, width, height);
+}
+
+/**
+ * The scallop of light each downlight throws on the wall behind it. Drawn as a soft shape
+ * added to the wall, so it costs nothing per pixel beyond the shape itself.
+ */
+function addWallWashes(room, renderer, roomSize) {
+  const axis = fixtureAxis(roomSize);
+  const mesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: roomTextures(renderer).wash,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+    axis.length * 4,
+  );
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3(WASH_WIDTH, WASH_HEIGHT, 1);
+  const distance = roomSize / 2 - WALL_EFFECT_OFFSET;
+  let index = 0;
+  for (let wall = 0; wall < 4; wall++) {
+    const angle = (wall * Math.PI) / 2;
+    rotation.setFromAxisAngle(up, angle);
+    for (const along of axis) {
+      position.set(
+        -Math.sin(angle) * distance + Math.cos(angle) * along,
+        ROOM_HEIGHT - WASH_HEIGHT / 2,
+        -Math.cos(angle) * distance - Math.sin(angle) * along,
+      );
+      mesh.setMatrixAt(index++, matrix.compose(position, rotation, scale));
+    }
+  }
+  mesh.frustumCulled = false;
+  room.add(mesh);
+}
+
+/**
+ * A soft picture of a warm, dim room with bright lamps overhead, for materials to reflect.
+ * This is what gives polished wood its sheen and rounded edges their highlights, and what
+ * keeps surfaces facing away from every lamp from going black.
+ */
+function createEnvironment(renderer) {
+  const scene = new THREE.Scene();
+  const shell = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 4, 10),
+    // Order is right, left, ceiling, floor, front, back. The floor is bright enough to light undersides.
+    [0.16, 0.16, 0.3, 0.32, 0.16, 0.16].map(
+      (level) =>
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(level * 1.05, level * 0.86, level * 0.68),
+          side: THREE.BackSide,
+        }),
+    ),
+  );
+  scene.add(shell);
+
+  const lampMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 7.2, 5.2) });
+  const lampGeometry = new THREE.BoxGeometry(0.9, 0.02, 0.9);
+  for (const x of [-3, 0, 3]) {
+    for (const z of [-3, 0, 3]) {
+      const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
+      lamp.position.set(x, 1.95, z);
+      scene.add(lamp);
+    }
+  }
+
+  const generator = new THREE.PMREMGenerator(renderer);
+  const { texture } = generator.fromScene(scene, 0.03);
+  generator.dispose();
+  shell.geometry.dispose();
+  shell.material.forEach((material) => material.dispose());
+  lampMaterial.dispose();
+  lampGeometry.dispose();
+  return texture;
 }
 
 /**
@@ -167,16 +363,19 @@ function addLights(room, roomSize) {
   const strength = Math.max(MIN_LIGHT_STRENGTH, (roomSize / LIGHTING_REFERENCE_ROOM_SIZE) ** LIGHT_DECAY);
 
   // The ground colour stands in for light bouncing off the floor, which lifts the ceiling.
-  room.add(new THREE.HemisphereLight(0xffd7a3, 0x8a5a33, 2.1));
+  room.add(new THREE.HemisphereLight(0xffe2c0, 0x8a6240, 0.7));
 
   // One central light casts the room's shadows. See SceneManager for why they're static.
-  const central = new THREE.SpotLight(GOLD, 16 * strength, 0, 1.45, 0.9, LIGHT_DECAY);
+  // Its cone only just reaches the corners, which spends the shadow map's detail on the room.
+  const cornerAngle = Math.atan2((roomSize / 2) * Math.SQRT2, ROOM_HEIGHT);
+  const central = new THREE.SpotLight(LIGHT_COLOR, 15 * strength, 0, Math.min(cornerAngle + 0.05, 1.5), 0.8, LIGHT_DECAY);
   central.position.set(0, ROOM_HEIGHT - 0.02, 0);
   central.target.position.set(0, 0, 0);
   central.castShadow = true;
-  central.shadow.mapSize.set(2048, 2048);
-  central.shadow.bias = -0.0006;
-  central.shadow.normalBias = 0.02;
+  central.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  central.shadow.bias = -0.0004;
+  central.shadow.normalBias = 0.015;
+  central.shadow.radius = 3;
   central.shadow.camera.near = 0.3;
   central.shadow.camera.far = roomSize + 4;
   room.add(central, central.target);
@@ -186,7 +385,7 @@ function addLights(room, roomSize) {
   const nearest = (target) => axis.reduce((best, x) => (Math.abs(x - target) < Math.abs(best - target) ? x : best));
   const offset = nearest(roomSize * FILL_LIGHT_INSET);
   for (const [x, z] of [[-offset, -offset], [offset, -offset], [-offset, offset], [offset, offset]]) {
-    const light = new THREE.SpotLight(GOLD, 9 * strength, 0, 1.3, 0.8, LIGHT_DECAY);
+    const light = new THREE.SpotLight(LIGHT_COLOR, 9 * strength, 0, 1.3, 0.8, LIGHT_DECAY);
     light.position.set(x, ROOM_HEIGHT - 0.02, z);
     light.target.position.set(x, 0, z);
     room.add(light, light.target);
@@ -209,29 +408,29 @@ function addFixtures(room, roomSize) {
 
   const trim = instanceAtFixtures(
     faceDown(new THREE.RingGeometry(FIXTURE_RADIUS, FIXTURE_RADIUS + FIXTURE_TRIM_WIDTH, 32)),
-    new THREE.MeshStandardMaterial({ color: 0x9c7434, metalness: 0.5, roughness: 0.45 }),
+    new THREE.MeshStandardMaterial({ color: 0xb08a48, metalness: 0.85, roughness: 0.35 }),
     positions,
     ROOM_HEIGHT - 0.002,
   );
   const shaft = instanceAtFixtures(
     new THREE.CylinderGeometry(FIXTURE_RADIUS, FIXTURE_RADIUS, FIXTURE_RECESS, 32, 1, true),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(1.1), side: THREE.BackSide }),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(LAMP_GLOW).multiplyScalar(1.1), side: THREE.BackSide }),
     positions,
     ROOM_HEIGHT + FIXTURE_RECESS / 2,
   );
   const lamp = instanceAtFixtures(
     faceDown(new THREE.CircleGeometry(FIXTURE_RADIUS, 32)),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(GOLD).multiplyScalar(2.4) }),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(LAMP_GLOW).multiplyScalar(2.4) }),
     positions,
     ROOM_HEIGHT + FIXTURE_RECESS,
   );
   room.add(trim, shaft, lamp);
 }
 
+/** Leaves the textures alone: the next room reuses them. */
 function disposeRoom(room) {
   room.traverse((object) => {
     object.geometry?.dispose();
-    object.material?.map?.dispose();
     object.material?.dispose();
     object.dispose?.(); // lights and instanced meshes hold GPU resources of their own
   });
@@ -246,9 +445,17 @@ export function buildRoom(scene, renderer, { roomSize }) {
   const previous = scene.getObjectByName(ROOM_OBJECT_NAME);
   if (previous) disposeRoom(previous);
 
+  // It doesn't depend on the room's size, so it's made once and kept.
+  scene.environment ??= createEnvironment(renderer);
+  scene.environmentIntensity = ENVIRONMENT_INTENSITY;
+
   const room = new THREE.Group();
   room.name = ROOM_OBJECT_NAME;
-  addSurfaces(room, renderer, roomSize);
+  addFloor(room, renderer, roomSize);
+  addCeiling(room, roomSize);
+  addWalls(room, renderer, roomSize);
+  addWoodwork(room, renderer, roomSize);
+  addWallWashes(room, renderer, roomSize);
   addLights(room, roomSize);
   addFixtures(room, roomSize);
   scene.add(room);
