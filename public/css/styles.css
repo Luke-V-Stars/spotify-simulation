@@ -11,7 +11,7 @@
   --serif: Georgia, "Times New Roman", serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --edge: 16px;
-  --now-playing-height: 76px;
+  --now-playing-height: 96px;
 }
 
 * {
@@ -313,14 +313,55 @@ body.has-now-playing .song-panel {
 
 .now-art {
   flex: none;
-  width: 58px;
-  height: 58px;
+  width: 78px;
+  height: 78px;
   border-radius: 6px;
   background: #2a1c10;
 }
 
 .now-art:not([src]) {
   visibility: hidden;
+}
+
+.now-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.now-row,
+.now-timeline {
+  display: flex;
+  align-items: center;
+}
+
+.now-row {
+  gap: 12px;
+}
+
+.now-timeline {
+  gap: 8px;
+}
+
+.now-timeline input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--gold);
+}
+
+.now-time {
+  flex: none;
+  min-width: 34px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#now-elapsed {
+  text-align: right;
 }
 
 .now-text {
@@ -346,6 +387,11 @@ body.has-now-playing .song-panel {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.now-skip {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .now-toggle {
@@ -485,7 +531,13 @@ body.has-now-playing .song-panel {
     margin-top: 12px;
   }
 
-  .now-volume {
+  .now-art {
+    width: 58px;
+    height: 58px;
+  }
+
+  .now-volume,
+  .now-skip {
     display: none;
   }
 }

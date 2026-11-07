@@ -40,6 +40,8 @@ These come from Spotify's [February 2026 changes](https://developer.spotify.com/
 - **The app owner needs Premium**, and a new app is limited to 5 users, who must be added in the dashboard.
 - **Playback requires Premium for each listener**, plus a browser that supports EME (desktop Chrome, Edge or Firefox). Anyone else can still browse the shelves and song details.
 
+Choosing **Connect Spotify** always asks for a Spotify login. To do that it first ends the browser's Spotify session, which also signs that browser out of other Spotify sites such as the web player.
+
 ## Controls
 
 | Action | Mouse | Touch |

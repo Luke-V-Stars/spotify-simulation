@@ -64,15 +64,19 @@ test('login is refused cleanly when not configured', async () => {
   }
 });
 
-test('login redirects to Spotify with the right parameters and sets a state cookie', async () => {
+test('login ends the Spotify session, then authorizes with the right parameters and a state cookie', async () => {
   const response = await get('/auth/login');
   assert.equal(response.status, 302);
-  const location = new URL(response.headers.get('location'));
-  assert.equal(location.origin + location.pathname, 'https://accounts.spotify.com/authorize');
-  assert.equal(location.searchParams.get('client_id'), 'test-id');
-  assert.equal(location.searchParams.get('redirect_uri'), `${ORIGIN}/auth/callback`);
-  assert.equal(location.searchParams.get('scope'), SCOPES.join(' '));
-  assert.equal(cookiesFrom(response).sp_oauth_state, location.searchParams.get('state'));
+  const logout = new URL(response.headers.get('location'));
+  assert.equal(logout.origin + logout.pathname, 'https://accounts.spotify.com/en/logout');
+
+  const authorize = new URL(logout.searchParams.get('continue'));
+  assert.equal(authorize.origin + authorize.pathname, 'https://accounts.spotify.com/authorize');
+  assert.equal(authorize.searchParams.get('client_id'), 'test-id');
+  assert.equal(authorize.searchParams.get('redirect_uri'), `${ORIGIN}/auth/callback`);
+  assert.equal(authorize.searchParams.get('scope'), SCOPES.join(' '));
+  assert.equal(authorize.searchParams.get('show_dialog'), 'true');
+  assert.equal(cookiesFrom(response).sp_oauth_state, authorize.searchParams.get('state'));
   assert.ok(!response.headers.get('location').includes(SECRET));
 });
 

@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SpotifyApiClient, SpotifyApiError } from '../public/js/spotify/apiClient.js';
 import { fetchAssembledShelves, fetchLibrary, mapPlaylistEntry } from '../public/js/spotify/libraryService.js';
+import { DemoPlayback } from '../public/js/spotify/demoLibrary.js';
 import { mapSdkState, playbackRequest } from '../public/js/spotify/playbackService.js';
 import { formatDuration, formatReleaseDate } from '../public/js/ui/format.js';
+import { positionAt } from '../public/js/ui/nowPlayingBar.js';
 
 const jsonResponse = (body, status = 200, headers = {}) =>
   new Response(body === null ? null : JSON.stringify(body), { status, headers });
@@ -323,6 +325,49 @@ test('maps SDK state, keeping the original URI of relinked tracks', () => {
 
 test('null SDK state (playback moved elsewhere) maps to null', () => {
   assert.equal(mapSdkState(null), null);
+});
+
+test('maps the SDK position and duration', () => {
+  const state = mapSdkState({
+    paused: false,
+    position: 42_000,
+    duration: 215_000,
+    track_window: { current_track: { uri: 'u', name: 'Song', artists: [] } },
+  });
+  assert.equal(state.positionMs, 42_000);
+  assert.equal(state.durationMs, 215_000);
+});
+
+test('the bar advances the position while playing, holds it when paused, and stops at the end', () => {
+  const state = { positionMs: 10_000, durationMs: 60_000, paused: false };
+  assert.equal(positionAt(state, 5000), 15_000);
+  assert.equal(positionAt({ ...state, paused: true }, 5000), 10_000);
+  assert.equal(positionAt(state, 90_000), 60_000);
+});
+
+test('demo playback reports the duration, restarts each song, and seeks', async () => {
+  const track = { uri: 't', title: 'T', artists: ['A'], artThumbUrl: null, durationMs: 200_000 };
+  const playback = new DemoPlayback();
+  let state;
+  playback.onState((next) => {
+    state = next;
+  });
+
+  await playback.playTrack(track, { uri: 'p', tracks: [track] });
+  assert.equal(state.durationMs, 200_000);
+  assert.ok(state.positionMs < 1000);
+
+  await playback.toggle(); // paused, so the position below can't drift
+  await playback.seek(90_000);
+  assert.equal(state.positionMs, 90_000);
+  assert.equal(state.paused, true);
+
+  await playback.toggle();
+  await playback.toggle();
+  assert.ok(state.positionMs >= 90_000 && state.positionMs < 91_000, 'pausing keeps the position');
+
+  await playback.next();
+  assert.ok(state.positionMs < 1000);
 });
 
 test('formats durations', () => {

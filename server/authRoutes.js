@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto';
 
 const AUTHORIZE_URL = 'https://accounts.spotify.com/authorize';
+const LOGOUT_URL = 'https://accounts.spotify.com/en/logout';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
 const REFRESH_COOKIE = 'sp_refresh';
@@ -103,8 +104,12 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
       scope: SCOPES.join(' '),
       redirect_uri: config.redirectUri,
       state,
+      show_dialog: 'true', // never approve silently, even if the logout below stops working
     });
-    redirect(res, `${AUTHORIZE_URL}?${query}`, [buildCookie(STATE_COOKIE, state, STATE_MAX_AGE_SECONDS)]);
+    // Spotify would otherwise reuse the account this browser is signed in to, so end
+    // that session first. `continue` is undocumented, but sends the browser on to authorize.
+    const logoutQuery = new URLSearchParams({ continue: `${AUTHORIZE_URL}?${query}` });
+    redirect(res, `${LOGOUT_URL}?${logoutQuery}`, [buildCookie(STATE_COOKIE, state, STATE_MAX_AGE_SECONDS)]);
   }
 
   async function handleCallback(req, res, url) {

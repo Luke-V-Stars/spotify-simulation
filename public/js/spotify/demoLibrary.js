@@ -103,6 +103,9 @@ export class DemoPlayback {
   #playlist = null;
   #index = -1;
   #paused = true;
+  /** Position when the song last started, resumed, paused or moved, and when that was. */
+  #positionMs = 0;
+  #positionSetAt = 0;
 
   onState(callback) {
     this.#stateListeners.push(callback);
@@ -116,11 +119,18 @@ export class DemoPlayback {
     this.#playlist = playlist;
     this.#index = playlist.tracks.indexOf(track);
     this.#paused = false;
+    this.#moveTo(0);
     this.#emit();
   }
 
   async toggle() {
+    this.#moveTo(this.#currentPosition());
     this.#paused = !this.#paused;
+    this.#emit();
+  }
+
+  async seek(positionMs) {
+    this.#moveTo(positionMs);
     this.#emit();
   }
 
@@ -139,7 +149,17 @@ export class DemoPlayback {
     const count = this.#playlist.tracks.length;
     this.#index = (this.#index + direction + count) % count;
     this.#paused = false;
+    this.#moveTo(0);
     this.#emit();
+  }
+
+  #moveTo(positionMs) {
+    this.#positionMs = positionMs;
+    this.#positionSetAt = Date.now();
+  }
+
+  #currentPosition() {
+    return this.#paused ? this.#positionMs : this.#positionMs + Date.now() - this.#positionSetAt;
   }
 
   #emit() {
@@ -151,6 +171,8 @@ export class DemoPlayback {
       artUrl: track.artThumbUrl,
       paused: this.#paused,
       contextUri: this.#playlist.uri,
+      positionMs: this.#currentPosition(),
+      durationMs: track.durationMs,
     };
     this.#stateListeners.forEach((listener) => listener(state));
   }

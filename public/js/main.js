@@ -98,6 +98,7 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
     onToggle: () => playback.toggle().catch(reportFailure),
     onNext: () => playback.next()?.catch(reportFailure),
     onPrevious: () => playback.previous()?.catch(reportFailure),
+    onSeek: (positionMs) => playback.seek(positionMs)?.catch(reportFailure),
     onVolume: (volume) => playback.setVolume(volume),
   });
 

@@ -6,7 +6,7 @@
  * no longer exposes the subscription level on the user profile.
  *
  * SpotifyPlayback and DemoPlayback (demoLibrary.js) share one interface:
- *   start(), playTrack(track, playlist, shelfTracks), toggle(), next(), previous(), setVolume(v)
+ *   start(), playTrack(track, playlist, shelfTracks), toggle(), next(), previous(), seek(ms), setVolume(v)
  *   onState(cb), where cb gets a PlaybackState or null when nothing is playing
  *   onError(cb), where cb gets a user-facing message, and { fatal: true } if
  *     playback can never work in this session
@@ -21,6 +21,8 @@
  * @property {string|null} artUrl
  * @property {boolean} paused
  * @property {string|null} contextUri
+ * @property {number} positionMs how far into the song it was when this state was reported
+ * @property {number} durationMs
  */
 
 const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
@@ -158,6 +160,10 @@ export class SpotifyPlayback {
     return this.#player?.previousTrack();
   }
 
+  seek(positionMs) {
+    return this.#player?.seek(positionMs);
+  }
+
   setVolume(volume) {
     return this.#player?.setVolume(volume);
   }
@@ -198,5 +204,7 @@ export function mapSdkState(state) {
     artUrl: track.album?.images?.at(-1)?.url ?? null,
     paused: state.paused,
     contextUri: state.context?.uri ?? null,
+    positionMs: state.position,
+    durationMs: state.duration,
   };
 }
