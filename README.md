@@ -1,8 +1,8 @@
 # spotify-simulation
 
-A 3D space where your Spotify library is viewable and can play music.
+**Vinyl Listening Room**: a 3D space where your Spotify library is viewable and can play music.
 
-Every playlist becomes a bookshelf in a listening room sized to your library, and every song a vinyl record in a sleeve showing its album cover. Walk around the room, click a record to see the song's details, and, with Spotify Premium, play it right there.
+Every playlist becomes a walnut bookshelf in a wood-panelled listening room sized to your library, and every song a vinyl record in a sleeve showing its album cover. Walk around the room, click a record to see the song's details, and, with Spotify Premium, play it right there from a full player bar with seeking and volume. Your top 5 songs hang on the wall as gold record awards.
 
 ## Quick start
 
@@ -52,11 +52,24 @@ Choosing **Connect Spotify** always asks for a Spotify login. To do that it firs
 | Open a song's details | Click a record | Tap a record |
 | Fly to a shelf | Click the shelf, or choose it under **Shelves** | Tap the shelf, or choose it under **Shelves** |
 
+### Player bar
+
+Once a song is playing, a bar along the bottom of the screen shows its cover, title and artist, with:
+
+- **Previous / next** song, and **play / pause**.
+- **−10 / +10** buttons to skip back or forward 10 seconds.
+- A **timeline** showing elapsed and total time. Drag it to seek: the song only jumps when you let go, and the slider isn't pulled from under you while you hold it.
+- A **volume** slider.
+
+The demo room's player simulates the same position, seeking and track changes without any audio.
+
 ## How it behaves
 
 - **Shelves:** each holds up to 50 records, with overflow shelves added beside it and labelled by part, such as `Road Trip (2/3)`. Empty playlists still get a shelf.
 - **Extra shelves:** Liked Songs comes first and holds every song you've liked, followed by Your Top Songs (your top 50 from about the last 6 months) and Suggested For You. Suggestions are up to 50 songs you don't already have: songs in your top artists' most common genres, then other songs by those artists. They're built from search results because Spotify has deprecated its recommendations endpoint, and the genre part depends on a field Spotify has also marked deprecated, so they aren't Spotify's own personalised picks. Next and previous stay within the shelf on these, as they're played by song rather than as a playlist. If you connected before these shelves were added, restart the server, then sign out and connect again to grant the new permissions.
 - **Wall plaques:** your top 5 songs hang on the far wall like gold record awards, with number one at the centre. Clicking one opens that song, as with any record.
+- **The room:** a polished oak plank floor, walnut panelling below fabric-covered walls, crown moulding, a beamed ceiling and recessed warm downlights that throw scallops of light on the walls. Every texture is painted on a canvas when the page loads, so the project ships no image files.
+- **The shelves:** walnut, with softened edges, a stepped top, raised strips up each side and a lip along each board to keep records in. Each shelf is a slightly different tone, as if cut from a different board, and a hidden warm light strip under each board glows down the back between the records.
 - **Room size:** the room is the smallest square that fits every shelf, from 7.5m to 25m across.
 - **Placement:** every shelf stands in a freestanding row, like the stacks in a library, either side of a central aisle and clear of the walls (96 in all). Beyond that, all shelves shrink evenly so that nothing is left out.
 - **Starting point:** you start against one wall, looking down the central aisle toward your first playlists, which begin at the far end of the rows. Shelves and walls stop you walking through them.
@@ -77,7 +90,7 @@ public/js/
   main.js                Connects all the modules below
   auth/                  Browser side of authentication
   spotify/               Web API client, library loading, Playback SDK, demo mode
-  scene/                 Renderer, camera, walking controls, the room, painted textures, texture arrays
+  scene/                 Renderer, camera, walking controls, the room, painted textures, softened-box woodwork, texture arrays
   bookshelves/           Which shelves exist, the room's size, where they stand, their meshes
   vinyl/                 Instanced sleeves and discs, shader, album art streaming, glow, wall plaques
   interactions/          Hover and click handling, and picking
@@ -99,6 +112,8 @@ The room is designed so that cost grows slowly with library size:
 - **No per-frame data uploads.** Hover, selection, spin and glow are uniforms compared against `gl_InstanceID` in the shader.
 - **Picking does no raycasting against triangles.** `recordPicker.js` intersects the ray with each shelf's box and computes the grid cell, so its cost depends on shelf count rather than song count.
 - **Rendering on demand.** A still room issues no draw calls at all.
+- **All shelves in one mesh.** Every shelf's woodwork, light strip and engraved name is an instance of a shared mesh, so adding shelves barely adds draw calls. `boxBatch.js` builds the woodwork from real-sized boxes whose shared-vertex chamfers read as rounded edges at 44 triangles a box.
+- **Few real lights.** Every ceiling fixture glows, but only five are real lights, since each one costs every pixel. A painted environment map supplies the sheen on polished wood and keeps faces turned away from the lamps from going black.
 - **Static shadows.** The shadow map is drawn once, since shelves don't move.
 - **Simpler shelves when there are many.** Past 200 shelves, each drops its softened edges and small decorative parts, going from about 900 triangles to about 150.
 - **Streamed artwork.** Covers load in the background using Spotify's 300px images, scaled down, and upload in batches. The song panel uses the full-size image.
@@ -109,4 +124,4 @@ The room is designed so that cost grows slowly with library size:
 npm test
 ```
 
-These cover shelf planning and layout, walking and collisions, picking, Spotify response handling and retries, the OAuth routes with Spotify mocked, and static file safety. No credentials or network access are needed.
+These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, the OAuth routes with Spotify mocked, and static file safety. No credentials or network access are needed.
