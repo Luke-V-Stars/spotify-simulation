@@ -23,6 +23,9 @@
       <button id="shelves-toggle" class="pill-button" type="button" aria-expanded="false" aria-controls="shelf-drawer">
         Shelves
       </button>
+      <button id="source-toggle" class="pill-button" type="button" hidden>
+        <span class="source-prefix">Play from: </span><span id="source-name">Spotify</span>
+      </button>
       <span id="mode-badge" class="mode-badge" hidden>Demo: no audio</span>
       <p class="control-hint">Drag below eye level to move · Right-drag to look around · Scroll to walk forward · Click a record</p>
       <button id="sign-out" class="pill-button" type="button">Sign out</button>
@@ -78,6 +81,12 @@
         </div>
       </div>
     </footer>
+
+    <!-- After the panels above, so it's drawn over them: YouTube's player must never be covered. -->
+    <aside id="tv-panel" class="tv-panel" aria-label="YouTube player" hidden>
+      <div class="tv-screen"><div id="tv-player"></div></div>
+      <p id="tv-status" class="tv-status"></p>
+    </aside>
 
     <section id="welcome" class="welcome" aria-labelledby="welcome-title">
       <div class="welcome-card">

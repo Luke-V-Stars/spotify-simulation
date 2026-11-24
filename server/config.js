@@ -27,6 +27,7 @@ export function loadConfig(env = process.env) {
 
   const isLoopback = LOOPBACK_HOSTS.has(redirect.hostname);
   const redirectPort = redirect.port || (redirect.protocol === 'https:' ? '443' : '80');
+  const youtubeApiKey = isPlaceholder(env.YOUTUBE_API_KEY) ? null : env.YOUTUBE_API_KEY.trim();
 
   return {
     clientId,
@@ -34,6 +35,9 @@ export function loadConfig(env = process.env) {
     redirectUri,
     missing,
     configured: missing.length === 0,
+    /** Server-side only: used to search YouTube, never sent to the browser. */
+    youtubeApiKey,
+    youtubeConfigured: youtubeApiKey !== null,
     /** Path the OAuth callback is served from, derived so it can't drift from the URI. */
     callbackPath: redirect.pathname,
     /** Origin Spotify redirects back to. Cookies must be set on this host. */

@@ -5,7 +5,8 @@
  * Premium is only detectable here, through the SDK's `account_error`. The Web API
  * no longer exposes the subscription level on the user profile.
  *
- * SpotifyPlayback and DemoPlayback (demoLibrary.js) share one interface:
+ * SpotifyPlayback, YouTubePlayback (youtube/youtubePlayback.js), DemoPlayback (demoLibrary.js)
+ * and PlaybackSwitch (playback/playbackSwitch.js) share one interface:
  *   start(), playTrack(track, playlist, shelfTracks), toggle(), next(), previous(), seek(ms), setVolume(v)
  *   onState(cb), where cb gets a PlaybackState or null when nothing is playing
  *   onError(cb), where cb gets a user-facing message, and { fatal: true } if
@@ -61,6 +62,8 @@ export class SpotifyPlayback {
   #fatalError = null;
   #deviceReady;
   #resolveDeviceReady;
+  #failed;
+  #resolveFailed;
   #stateListeners = [];
   #errorListeners = [];
 
@@ -73,6 +76,9 @@ export class SpotifyPlayback {
     this.#getToken = getToken;
     this.#deviceReady = new Promise((resolve) => {
       this.#resolveDeviceReady = resolve;
+    });
+    this.#failed = new Promise((resolve) => {
+      this.#resolveFailed = resolve;
     });
   }
 
@@ -164,6 +170,11 @@ export class SpotifyPlayback {
     return this.#player?.seek(positionMs);
   }
 
+  /** Pauses without toggling, for when another player takes over. */
+  pause() {
+    return this.#player?.pause();
+  }
+
   setVolume(volume) {
     return this.#player?.setVolume(volume);
   }
@@ -176,7 +187,8 @@ export class SpotifyPlayback {
       timer = setTimeout(() => reject(new Error('The Spotify player is taking too long to connect.')), READY_TIMEOUT_MS);
     });
     try {
-      await Promise.race([this.#deviceReady, timeout]);
+      // A failure such as no Premium ends the wait at once, rather than at the timeout.
+      await Promise.race([this.#deviceReady, this.#failed, timeout]);
     } finally {
       clearTimeout(timer);
     }
@@ -185,6 +197,7 @@ export class SpotifyPlayback {
 
   #fail(message) {
     this.#fatalError = message;
+    this.#resolveFailed();
     this.#emitError(message, { fatal: true });
   }
 

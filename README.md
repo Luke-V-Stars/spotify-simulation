@@ -2,7 +2,7 @@
 
 **Vinyl Listening Room**: a 3D space where your Spotify library is viewable and can play music.
 
-Every playlist becomes a walnut bookshelf in a wood-panelled listening room sized to your library, and every song a vinyl record in a sleeve showing its album cover. Walk around the room, click a record to see the song's details, and, with Spotify Premium, play it right there from a full player bar with seeking and volume. Your top 5 songs hang on the wall as gold record awards.
+Every playlist becomes a walnut bookshelf in a wood-panelled listening room sized to your library, and every song a vinyl record in a sleeve showing its album cover. Walk around the room, click a record to see the song's details, and play it right there from a full player bar with seeking and volume: through Spotify with Premium, or from YouTube on a TV for anyone else. Your top 5 songs hang on the wall as gold record awards.
 
 ## Quick start
 
@@ -41,6 +41,24 @@ These come from Spotify's [February 2026 changes](https://developer.spotify.com/
 - **Playback requires Premium for each listener**, plus a browser that supports EME (desktop Chrome, Edge or Firefox). Anyone else can still browse the shelves and song details.
 
 Choosing **Connect Spotify** always asks for a Spotify login. To do that it first ends the browser's Spotify session, which also signs that browser out of other Spotify sites such as the web player.
+
+## Playing from YouTube (optional)
+
+Songs can also play from YouTube on a TV in the corner of the screen. This is for listeners Spotify can't play for, such as without Premium or on a phone, and for anyone who chooses it with the **Play from** button in the top bar.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials), create an API key, and enable **YouTube Data API v3** for its project. Restricting the key to that API is a good idea.
+2. Add it to `.env` as `YOUTUBE_API_KEY`, and restart the server.
+
+The key stays on the server, which searches YouTube for each song. Only the video IDs reach the browser.
+
+- **Which video plays:** the server searches for the artist and title, then puts the videos whose length is closest to the Spotify song's first, which favours the studio recording over live versions and long music videos. If a video's owner doesn't allow it to play on other sites, the next match plays instead.
+- **Automatic switch:** when Spotify can't play in this session, songs switch to YouTube by themselves and the **Play from** button goes away.
+- **The daily limit:** Google's default quota allows about 100 searches a day, and it resets at midnight Pacific time. Each song is searched for only the first time it's played. Matches are saved in `data/youtube-matches.json`, which is ignored by git, and kept for 30 days, so replaying songs or restarting the server costs nothing.
+- **Ads** play as they would on YouTube.
+- **The on-screen TV** stays visible, at least 200 × 200 pixels and uncovered, while a song is loaded, as YouTube's rules for embedded players require. The song panel moves below it. Its line underneath shows which video is playing, so a wrong match is easy to spot.
+- **The TV in the room** hangs on the far wall above the plaques. It shows the cover, title and artist of whatever is playing, from either service. It can't show the video itself, because browsers don't let a page read the picture from another site's player.
+- **Next and previous** move through the whole playlist, or through the shelf for Liked Songs, Your Top Songs and Suggested For You. At the end of the list, playback stops. A song with no playable video is skipped when the list reaches it, but not when you chose it yourself.
+- **The demo room stays silent:** its songs are invented, so there's nothing to find on YouTube.
 
 ## Controls
 
@@ -85,16 +103,19 @@ The demo room's player simulates the same position, seeking and track changes wi
 server/                  Node server with no framework
   config.js              Reads and validates environment variables
   authRoutes.js          OAuth 2.0 flow; the only code that uses the client secret
+  youtubeMatches.js      Finds each song's YouTube video, and remembers matches; the only code that uses the YouTube key
   app.js                 Routes and static files
 public/js/
   main.js                Connects all the modules below
   auth/                  Browser side of authentication
   spotify/               Web API client, library loading, Playback SDK, demo mode
-  scene/                 Renderer, camera, walking controls, the room, painted textures, softened-box woodwork, texture arrays
+  youtube/               YouTube's player, asking the server for matches, playing through a list
+  playback/              Switching between Spotify and YouTube
+  scene/                 Renderer, camera, walking controls, the room, the wall TV, painted textures, softened-box woodwork, texture arrays
   bookshelves/           Which shelves exist, the room's size, where they stand, their meshes
   vinyl/                 Instanced sleeves and discs, shader, album art streaming, glow, wall plaques
   interactions/          Hover and click handling, and picking
-  ui/                    Panels, drawer, now-playing bar, overlay, formatting
+  ui/                    Panels, drawer, now-playing bar, TV panel, source button, overlay, formatting
 tests/                   Unit and server tests (npm test)
 ```
 
@@ -103,6 +124,8 @@ There's no build step: the browser loads ES modules directly, and the server exp
 ### Authentication
 
 The browser never sees the client secret or the refresh token. The server runs the Authorization Code flow, keeps the refresh token in an `HttpOnly` cookie, and hands the browser short-lived access tokens from `/auth/token`, held in memory only. The Web Playback SDK requires those tokens client-side. For a public deployment, use an HTTPS redirect URI, which also turns on `Secure` cookies.
+
+Pages are served with `Referrer-Policy: strict-origin-when-cross-origin`, because YouTube's embedded player refuses to play without a Referer naming the site. Other sites receive only the origin, never a full URL. For a public deployment, note that anyone who can reach the server can use `/youtube/match`, and so spend the day's search quota.
 
 ### Performance
 
@@ -124,4 +147,4 @@ The room is designed so that cost grows slowly with library size:
 npm test
 ```
 
-These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, the OAuth routes with Spotify mocked, and static file safety. No credentials or network access are needed.
+These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, YouTube matching, quota errors and the match cache with YouTube mocked, the YouTube player and switching between services, the OAuth routes with Spotify mocked, and static file safety. No credentials or network access are needed.

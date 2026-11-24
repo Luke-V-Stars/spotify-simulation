@@ -17,6 +17,9 @@ createApp(config).listen(config.port, config.host, () => {
   if (!config.configured) {
     console.log(`Spotify login disabled, demo mode only. Missing in .env: ${config.missing.join(', ')}`);
   }
+  if (!config.youtubeConfigured) {
+    console.log('YouTube playback disabled. Add YOUTUBE_API_KEY to .env to play songs on the TV.');
+  }
   if (config.usesRejectedLocalhost) {
     console.warn('Spotify rejects "localhost" redirect URIs. Use http://127.0.0.1:<port>/... instead.');
   }

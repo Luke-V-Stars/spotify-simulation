@@ -12,6 +12,12 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --edge: 16px;
   --now-playing-height: 96px;
+  /* The YouTube player's own size. YouTube requires at least 200 × 200 pixels. */
+  --tv-width: 480px;
+  --tv-height: 270px;
+  --tv-top: 68px;
+  /* The whole TV panel: the player plus its padding, border and status line. */
+  --tv-panel-height: calc(var(--tv-height) + 38px);
 }
 
 * {
@@ -241,6 +247,55 @@ button:disabled {
 
 body.has-now-playing .song-panel {
   max-height: calc(100vh - var(--now-playing-height) - 3 * var(--edge));
+}
+
+/* With the TV up, the song panel moves below it, so it never covers YouTube's player. */
+body.has-tv .song-panel {
+  top: calc(var(--tv-top) + var(--tv-panel-height) + var(--edge));
+  max-height: calc(100vh - var(--tv-top) - var(--tv-panel-height) - 2 * var(--edge));
+}
+
+body.has-tv.has-now-playing .song-panel {
+  max-height: calc(100vh - var(--tv-top) - var(--tv-panel-height) - var(--now-playing-height) - 3 * var(--edge));
+}
+
+/* TV panel, holding YouTube's player */
+
+.tv-panel {
+  position: fixed;
+  top: var(--tv-top);
+  right: var(--edge);
+  height: var(--tv-panel-height);
+  padding: 8px 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-solid);
+}
+
+.tv-screen {
+  width: var(--tv-width);
+  height: var(--tv-height);
+  overflow: hidden;
+  border-radius: 6px;
+  background: #000;
+}
+
+.tv-screen > * {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.tv-status {
+  max-width: var(--tv-width);
+  margin: 6px 2px 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .song-close {
@@ -487,9 +542,32 @@ body.has-now-playing .song-panel {
   }
 }
 
+@media (max-width: 900px) {
+  :root {
+    --tv-width: 360px;
+    --tv-height: 203px;
+  }
+}
+
 @media (max-width: 640px) {
   :root {
     --edge: 10px;
+    --tv-top: 58px;
+    /* Full width, and never shorter than YouTube's 200 pixel minimum. */
+    --tv-width: calc(100vw - 2 * var(--edge) - 18px);
+    --tv-height: max(200px, calc((100vw - 2 * var(--edge) - 18px) * 9 / 16));
+  }
+
+  .tv-panel {
+    left: var(--edge);
+  }
+
+  .source-prefix {
+    display: none;
+  }
+
+  body.has-tv .song-panel {
+    top: auto;
   }
 
   .song-panel {

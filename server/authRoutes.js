@@ -181,6 +181,7 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
       sendJson(res, 200, {
         configured: config.configured,
         missing: config.missing,
+        youtubeConfigured: config.youtubeConfigured,
         authenticated: Boolean(parseCookies(req.headers.cookie)[REFRESH_COOKIE]),
       });
     } else if (method === 'GET' && pathname === '/auth/login') {

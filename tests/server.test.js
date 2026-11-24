@@ -4,15 +4,18 @@ import { after, before, test } from 'node:test';
 import { createApp } from '../server/app.js';
 import { SCOPES } from '../server/authRoutes.js';
 import { loadConfig } from '../server/config.js';
+import { MatchCache } from '../server/youtubeMatches.js';
 
 const TEST_PORT = 18931;
 const ORIGIN = `http://127.0.0.1:${TEST_PORT}`;
 const SECRET = 'test-secret-value';
+const YOUTUBE_KEY = 'test-youtube-key-value';
 
 const config = loadConfig({
   SPOTIFY_CLIENT_ID: 'test-id',
   SPOTIFY_CLIENT_SECRET: SECRET,
   SPOTIFY_REDIRECT_URI: `${ORIGIN}/auth/callback`,
+  YOUTUBE_API_KEY: YOUTUBE_KEY,
 });
 
 /** Next answer from the fake Spotify token endpoint, and the last request it saw. */
@@ -25,7 +28,7 @@ const fakeFetch = async (url, options) => {
 
 let server;
 before(async () => {
-  server = createApp(config, fakeFetch);
+  server = createApp(config, fakeFetch, { matchCache: new MatchCache({ filePath: null }) });
   await new Promise((resolve) => server.listen(TEST_PORT, '127.0.0.1', resolve));
 });
 after(() => server.close());
@@ -54,7 +57,7 @@ test('placeholder values from .env.example count as not configured', () => {
 });
 
 test('login is refused cleanly when not configured', async () => {
-  const unconfigured = createApp(loadConfig({}), fakeFetch);
+  const unconfigured = createApp(loadConfig({}), fakeFetch, { matchCache: new MatchCache({ filePath: null }) });
   await new Promise((resolve) => unconfigured.listen(TEST_PORT + 1, '127.0.0.1', resolve));
   try {
     const response = await fetch(`http://127.0.0.1:${TEST_PORT + 1}/auth/login`, { redirect: 'manual' });
@@ -174,8 +177,9 @@ test('logout requires POST and clears the cookie', async () => {
 
 test('status never reveals secrets', async () => {
   const text = await (await get('/auth/status')).text();
-  assert.deepEqual(JSON.parse(text), { configured: true, missing: [], authenticated: false });
+  assert.deepEqual(JSON.parse(text), { configured: true, missing: [], youtubeConfigured: true, authenticated: false });
   assert.ok(!text.includes(SECRET));
+  assert.ok(!text.includes(YOUTUBE_KEY));
 });
 
 test('serves the app and Three.js', async () => {

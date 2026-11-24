@@ -1,3 +1,5 @@
 node_modules/
 # Real credentials live here. Never commit this file.
 .env
+# Songs already matched to YouTube videos, so they aren't searched for again.
+data/

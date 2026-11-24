@@ -9,7 +9,9 @@ import { buildBookshelves, shelfFocusView } from './bookshelves/bookshelfGenerat
 import { layoutBookshelves } from './bookshelves/shelfLayout.js';
 import { planBookshelves } from './bookshelves/shelfPlanner.js';
 import { SongInteractions } from './interactions/songInteractions.js';
+import { PlaybackSwitch } from './playback/playbackSwitch.js';
 import { buildRoom } from './scene/room.js';
+import { buildRoomTv } from './scene/roomTv.js';
 import { SceneManager } from './scene/sceneManager.js';
 import { SpotifyApiClient } from './spotify/apiClient.js';
 import { createDemoLibrary, DemoPlayback } from './spotify/demoLibrary.js';
@@ -18,11 +20,14 @@ import { SpotifyPlayback } from './spotify/playbackService.js';
 import { NowPlayingBar } from './ui/nowPlayingBar.js';
 import { ShelfDrawer } from './ui/shelfDrawer.js';
 import { SongPanel } from './ui/songPanel.js';
+import { savedSource, SourceToggle } from './ui/sourceToggle.js';
 import { showToast } from './ui/toast.js';
+import { TvPanel } from './ui/tvPanel.js';
 import { WelcomeOverlay } from './ui/welcomeOverlay.js';
 import { PlayingGlow } from './vinyl/playingGlow.js';
 import { VinylRecords } from './vinyl/vinylRecords.js';
 import { buildWallPlaques } from './vinyl/wallPlaques.js';
+import { YouTubePlayback } from './youtube/youtubePlayback.js';
 
 /** Size of the room shown behind the welcome screen, before the library has loaded. */
 const WELCOME_ROOM_SHELVES = 16;
@@ -58,6 +63,9 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
     ? topSongsShelf.tracks.slice(0, PLAQUE_COUNT).map((_, slot) => vinyl.recordAt(topSongsShelf, slot))
     : [];
   const plaques = buildWallPlaques(sceneManager.scene, sceneManager.renderer, plaqueRecords, layout.roomSize, () =>
+    sceneManager.invalidate(),
+  );
+  const roomTv = buildRoomTv(sceneManager.scene, sceneManager.renderer, layout.roomSize, () =>
     sceneManager.invalidate(),
   );
 
@@ -114,6 +122,7 @@ function openRoom(sceneManager, playlists, playback, { demoMode, onSignOut }) {
   playback.onState((state) => {
     playbackState = state;
     nowPlaying.update(state);
+    roomTv.show(state);
     if (state) vinyl.setPlaying(resolvePlayingInstance(state), state.paused);
     else vinyl.setPlaying();
     refreshPanelState();
@@ -172,7 +181,23 @@ function reportUnreadableShelves(playlists, assembled) {
   if (notes.length > 0) showToast(notes.join(' '), 12000);
 }
 
-async function startSpotifySession(sceneManager) {
+/**
+ * Spotify's player, or, when the server can search YouTube, a switch between it and
+ * YouTube on the TV. YouTube also takes over by itself if Spotify can't play here.
+ */
+function createSpotifyPlayback(api, getToken, { youtubeConfigured }) {
+  const spotify = new SpotifyPlayback(api, getToken);
+  if (!youtubeConfigured) return spotify;
+  const playback = new PlaybackSwitch({
+    spotify,
+    youtube: new YouTubePlayback({ tv: new TvPanel() }),
+    source: savedSource(),
+  });
+  new SourceToggle(playback);
+  return playback;
+}
+
+async function startSpotifySession(sceneManager, status) {
   const getToken = (options) => auth.getAccessToken(options);
   const api = new SpotifyApiClient(getToken);
 
@@ -185,7 +210,8 @@ async function startSpotifySession(sceneManager) {
   const assembled = await fetchAssembledShelves(api, playlists);
 
   // These go first, so Liked Songs is at the far end of the rows, ahead of the playlists.
-  openRoom(sceneManager, [...assembled.shelves, ...playlists], new SpotifyPlayback(api, getToken), {
+  const playback = createSpotifyPlayback(api, getToken, status);
+  openRoom(sceneManager, [...assembled.shelves, ...playlists], playback, {
     demoMode: false,
     onSignOut: async () => {
       await auth.logout();
@@ -251,7 +277,7 @@ async function main() {
   }
 
   try {
-    await startSpotifySession(sceneManager);
+    await startSpotifySession(sceneManager, status);
   } catch (error) {
     console.error(error);
     welcome.showChoices({ canConnect: status.configured });

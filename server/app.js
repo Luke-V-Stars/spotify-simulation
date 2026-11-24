@@ -10,8 +10,10 @@ import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAuthRoutes } from './authRoutes.js';
+import { createYouTubeMatcher, MatchCache, parseMatchQuery, YouTubeMatchError } from './youtubeMatches.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const MATCH_CACHE_PATH = join(ROOT, 'data', 'youtube-matches.json');
 
 /** URL prefix to directory. Only these directories are ever exposed. */
 const STATIC_MOUNTS = [
@@ -60,19 +62,53 @@ async function serveStatic(req, res, pathname) {
     'Content-Length': fileInfo.size,
     'Cache-Control': 'no-cache',
     'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
+    // YouTube's embedded player requires a Referer naming the site it's on, and refuses to
+    // play without one. This policy sends other sites only the origin, never the full URL.
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   });
   if (req.method === 'HEAD') res.end();
   else createReadStream(filePath).pipe(res);
 }
 
-export function createApp(config, fetchImpl) {
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+/** GET /youtube/match?title=…&artist=…&durationMs=…, answering with the videos to try, best first. */
+async function handleYouTubeMatch(res, url, findVideos) {
+  const song = parseMatchQuery(url.searchParams);
+  if (!song) {
+    sendJson(res, 400, { error: 'A song title is required.' });
+    return;
+  }
+  try {
+    const videos = await findVideos(song);
+    sendJson(res, 200, { videos: videos.map(({ id, title, channel }) => ({ id, title, channel })) });
+  } catch (error) {
+    if (!(error instanceof YouTubeMatchError)) throw error;
+    sendJson(res, error.status, { error: error.message });
+  }
+}
+
+/**
+ * @param {ReturnType<import('./config.js').loadConfig>} config
+ * @param {typeof fetch} [fetchImpl] injectable so tests never reach Spotify or YouTube
+ * @param {{matchCache?: MatchCache}} [options]
+ */
+export function createApp(config, fetchImpl = fetch, { matchCache = new MatchCache({ filePath: MATCH_CACHE_PATH }) } = {}) {
   const handleAuthRoute = createAuthRoutes(config, fetchImpl);
+  const findVideos = createYouTubeMatcher(config, { cache: matchCache, fetchImpl });
 
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://internal');
       if (await handleAuthRoute(req, res, url)) return;
+
+      if (req.method === 'GET' && url.pathname === '/youtube/match') {
+        await handleYouTubeMatch(res, url, findVideos);
+        return;
+      }
 
       if (req.method === 'GET' || req.method === 'HEAD') {
         await serveStatic(req, res, url.pathname);
