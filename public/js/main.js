@@ -9,6 +9,7 @@ import { buildBookshelves, shelfFocusView } from './bookshelves/bookshelfGenerat
 import { layoutBookshelves } from './bookshelves/shelfLayout.js';
 import { planBookshelves } from './bookshelves/shelfPlanner.js';
 import { SongInteractions } from './interactions/songInteractions.js';
+import { roomCodeFrom, SharedRoom } from './multiplayer/sharedRoom.js';
 import { PlaybackSwitch } from './playback/playbackSwitch.js';
 import { buildRoom } from './scene/room.js';
 import { buildRoomTv } from './scene/roomTv.js';
@@ -222,11 +223,13 @@ async function startSpotifySession(sceneManager, status) {
   reportUnreadableShelves(playlists, assembled);
 }
 
-function startDemoSession(sceneManager) {
+/** The demo room, which is also the room every shared room shows for now. */
+function startDemoSession(sceneManager, joinCode) {
   openRoom(sceneManager, createDemoLibrary(), new DemoPlayback(), {
     demoMode: true,
     onSignOut: () => window.location.assign('/'),
   });
+  new SharedRoom({ sceneManager, joinCode });
 }
 
 /** Removes the one-shot auth result from the URL, so a reload doesn't show it again. */
@@ -253,8 +256,9 @@ async function main() {
     return;
   }
 
-  if (params.has('demo')) {
-    startDemoSession(sceneManager);
+  const joinCode = roomCodeFrom(params);
+  if (params.has('demo') || joinCode) {
+    startDemoSession(sceneManager, joinCode);
     return;
   }
 

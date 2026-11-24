@@ -528,10 +528,67 @@ body.has-tv.has-now-playing .song-panel {
   width: max-content;
   max-width: min(560px, calc(100vw - 2 * var(--edge)));
   padding: 10px 16px;
+  overflow-wrap: anywhere; /* invite links are one long word */
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-solid);
   font-size: 14px;
+}
+
+/* Shared rooms: the name dialog */
+
+.name-dialog {
+  width: min(400px, calc(100vw - 2 * var(--edge)));
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-solid);
+  color: var(--ink);
+}
+
+.name-dialog::backdrop {
+  background: rgba(5, 4, 3, 0.6);
+  backdrop-filter: blur(3px);
+}
+
+.name-dialog-title {
+  margin: 0 0 8px;
+  font: 500 24px/1.2 var(--serif);
+  color: var(--gold-strong);
+}
+
+.name-dialog-text {
+  margin: 0 0 18px;
+  color: var(--ink-muted);
+}
+
+.name-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.name-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font: inherit;
+}
+
+.name-input:focus {
+  border-color: var(--gold);
+}
+
+/* Confirm is first in the markup, so Enter picks it; it's shown on the right. */
+.dialog-actions {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 /* Responsive: small screens get a bottom sheet in place of the side panel. */
@@ -562,7 +619,8 @@ body.has-tv.has-now-playing .song-panel {
     left: var(--edge);
   }
 
-  .source-prefix {
+  .source-prefix,
+  .mode-badge {
     display: none;
   }
 

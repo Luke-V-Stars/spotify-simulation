@@ -11,6 +11,8 @@ import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAuthRoutes } from './authRoutes.js';
 import { requestOrigin } from './config.js';
+import { attachMultiplayer } from './multiplayer.js';
+import { RoomRegistry } from './rooms.js';
 import { createYouTubeMatcher, MatchCache, parseMatchQuery, YouTubeMatchError } from './youtubeMatches.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -95,19 +97,30 @@ async function handleYouTubeMatch(res, url, findVideos) {
 /**
  * @param {ReturnType<import('./config.js').loadConfig>} config
  * @param {typeof fetch} [fetchImpl] injectable so tests never reach Spotify or YouTube
- * @param {{matchCache?: MatchCache}} [options]
+ * @param {{matchCache?: MatchCache, rooms?: RoomRegistry}} [options]
  */
-export function createApp(config, fetchImpl = fetch, { matchCache = new MatchCache({ filePath: MATCH_CACHE_PATH }) } = {}) {
+export function createApp(
+  config,
+  fetchImpl = fetch,
+  { matchCache = new MatchCache({ filePath: MATCH_CACHE_PATH }), rooms = new RoomRegistry() } = {},
+) {
   const handleAuthRoute = createAuthRoutes(config, fetchImpl);
   const findVideos = createYouTubeMatcher(config, { cache: matchCache, fetchImpl });
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://internal');
       if (await handleAuthRoute(req, res, url)) return;
 
       if (req.method === 'GET' && url.pathname === '/youtube/match') {
         await handleYouTubeMatch(res, url, findVideos);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/rooms') {
+        const code = rooms.create();
+        if (code) sendJson(res, 201, { code });
+        else sendJson(res, 503, { error: 'Too many rooms are open right now. Try again in a few minutes.' });
         return;
       }
 
@@ -129,4 +142,6 @@ export function createApp(config, fetchImpl = fetch, { matchCache = new MatchCac
       res.end();
     }
   });
+  attachMultiplayer(server, config, rooms);
+  return server;
 }

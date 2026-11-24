@@ -61,6 +61,18 @@ The key stays on the server, which searches YouTube for each song. Only the vide
 - **Next and previous** move through the whole playlist, or through the shelf for Liked Songs, Your Top Songs and Suggested For You. At the end of the list, playback stops. A song with no playable video is skipped when the list reaches it, but not when you chose it yourself.
 - **The demo room stays silent:** its songs are invented, so there's nothing to find on YouTube.
 
+## Shared rooms (in progress)
+
+People can walk around the same room together. For now, every shared room is the demo room.
+
+1. In the demo room, click **Invite friends**, choose the name others will see, and click **Open room**. The invite link, such as `http://localhost:8888/?room=K7QX2M`, is copied.
+2. Anyone who opens the link chooses a name and joins. Each player appears to the others as a figure in their own colour, with their name above it and a visor showing which way they face.
+3. The room button shows the code and how many people are there. Click it to copy the link again.
+
+- **Rooms:** codes are 6 random characters, without look-alikes such as 0 and O. A room holds up to 12 people, and closes 10 minutes after the last person leaves, so a reload rejoins it.
+- **What's shared:** only each player's chosen name and where they stand. No Spotify account, token or email is sent.
+- **Not yet:** friends on other computers can't join, because the server only listens on this computer until it's put online. Guests can't yet visit a host's real Spotify room, and music doesn't play in sync. Those are the next stages.
+
 ## Controls
 
 | Action | Mouse | Touch |
@@ -105,6 +117,8 @@ server/                  Node server with no framework
   config.js              Reads and validates environment variables
   authRoutes.js          OAuth 2.0 flow; the only code that uses the client secret
   youtubeMatches.js      Finds each song's YouTube video, and remembers matches; the only code that uses the YouTube key
+  rooms.js               Shared rooms: codes, who's in each, and checking every message
+  multiplayer.js         The WebSocket for shared rooms, with origin, size and rate limits
   app.js                 Routes and static files
 public/js/
   main.js                Connects all the modules below
@@ -112,15 +126,16 @@ public/js/
   spotify/               Web API client, library loading, Playback SDK, demo mode
   youtube/               YouTube's player, asking the server for matches, playing through a list
   playback/              Switching between Spotify and YouTube
+  multiplayer/           Shared rooms: the live connection, other players' figures, sending your position
   scene/                 Renderer, camera, walking controls, the room, the wall TV, painted textures, softened-box woodwork, texture arrays
   bookshelves/           Which shelves exist, the room's size, where they stand, their meshes
   vinyl/                 Instanced sleeves and discs, shader, album art streaming, glow, wall plaques
   interactions/          Hover and click handling, and picking
-  ui/                    Panels, drawer, now-playing bar, TV panel, source button, overlay, formatting
+  ui/                    Panels, drawer, now-playing bar, TV panel, source button, room button and name dialog, overlay, formatting
 tests/                   Unit and server tests (npm test)
 ```
 
-There's no build step: the browser loads ES modules directly, and the server exposes Three.js from `node_modules`.
+There's no build step: the browser loads ES modules directly, and the server exposes Three.js from `node_modules`. The only other dependency is [`ws`](https://www.npmjs.com/package/ws), the WebSocket server for shared rooms.
 
 ### Authentication
 
@@ -148,4 +163,4 @@ The room is designed so that cost grows slowly with library size:
 npm test
 ```
 
-These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, YouTube matching, quota errors and the match cache with YouTube mocked, the YouTube player and switching between services, the OAuth routes and the handover to `localhost` with Spotify mocked, and static file safety. No credentials or network access are needed.
+These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, YouTube matching, quota errors and the match cache with YouTube mocked, the YouTube player and switching between services, the OAuth routes and the handover to `localhost` with Spotify mocked, static file safety, and shared rooms: joining, moving, leaving, refusing bad messages, other sites and floods over a real socket, and the browser's reconnecting and smoothing. No credentials or network access are needed.

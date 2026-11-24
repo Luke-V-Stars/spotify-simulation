@@ -26,6 +26,7 @@
       <button id="source-toggle" class="pill-button" type="button" hidden>
         <span class="source-prefix">Play from: </span><span id="source-name">Spotify</span>
       </button>
+      <button id="room-button" class="pill-button" type="button" hidden>Invite friends</button>
       <span id="mode-badge" class="mode-badge" hidden>Demo: no audio</span>
       <p class="control-hint">Drag below eye level to move · Right-drag to look around · Scroll to walk forward · Click a record</p>
       <button id="sign-out" class="pill-button" type="button">Sign out</button>
@@ -103,6 +104,20 @@
         </div>
       </div>
     </section>
+
+    <dialog id="name-dialog" class="name-dialog" aria-labelledby="name-dialog-title">
+      <form method="dialog">
+        <h2 id="name-dialog-title" class="name-dialog-title">Join the room</h2>
+        <p id="name-dialog-text" class="name-dialog-text"></p>
+        <label class="name-label" for="name-input">Your name</label>
+        <input id="name-input" class="name-input" name="name" maxlength="24" autocomplete="nickname" required />
+        <!-- Confirm comes first, so Enter in the name field confirms; CSS shows it on the right. -->
+        <div class="dialog-actions">
+          <button id="name-confirm" class="primary-button" type="submit" value="ok">Join</button>
+          <button class="secondary-button" type="submit" value="cancel" formnovalidate>Cancel</button>
+        </div>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

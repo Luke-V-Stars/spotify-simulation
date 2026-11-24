@@ -50,11 +50,27 @@ Requires Node 20.12 or newer. There's no build step: the browser loads ES module
 - **YouTube Premium can't remove ads** in embedded players for guests. The user dropped that idea.
 - **Spotify Development Mode limits (February 2026):** followed playlists come back without songs, there are 5 allowlisted users, and playback needs Premium for every listener.
 - **Demo mode** (`/?demo=1`) uses an invented library and stays silent, even on YouTube.
+- **Browser checks:** headless Chrome (`--headless=new --use-angle=swiftshader --enable-unsafe-swiftshader`) with its own `--user-data-dir` in the scratchpad renders the WebGL room. Await every CDP call (an un-awaited `Page.navigate` looked like a bug). Synthetic wheel input to a background tab can stall.
 - **Debugging YouTube playback:** a headless Chrome driven over the DevTools protocol (Node's built-in `WebSocket`) can embed the IFrame API on the app's page and log state and error codes for given video IDs. This is how the error-150 cause was found.
+
+## Multiplayer (in progress)
+
+The plan has four stages. Stage 1 is done.
+
+1. **Shared room (done):**
+   - `server/rooms.js` (RoomRegistry, no network code) and `server/multiplayer.js` (`ws` at `/rooms/socket`, plus `POST /rooms`).
+   - Browser side in `public/js/multiplayer/`.
+   - Every shared room is the demo room, whose seeded library gives everyone the same layout.
+   - Invite links are `/?room=CODE`.
+   - Only names and poses `{x, z, yaw}` travel. Yaw is `camera.rotation.y`.
+2. **Guests visit the host's real room:** the host sends their library through the server, and `openRoom` builds from it. Don't send Spotify tokens.
+3. **Listen together:** the host sends the song, position, paused flag and time. Guests play it, through YouTube for anyone without Premium, with clock-offset sync, and resync past about 2 s of drift.
+4. **Put it online:** this needs HTTPS and a real domain. Locally the server binds to 127.0.0.1, and the WebSocket only accepts `Origin === config.appOrigin`, so LAN guests are refused too.
+
+Limits: 12 players a room, 200 rooms, 1 KB messages, 30 messages a second (more than 120 a second disconnects), and empty rooms close after 10 minutes.
 
 ## Ideas discussed, not built
 
-- **Multiplayer** (several people in one room, hearing the same song): talked through, but no code exists yet. Shared listening needs a source every guest can play, which is why YouTube was added.
 - **Other music sources:** Audius and Jamendo were considered, but their catalogues don't match Spotify's.
 
 ## Working with this user
@@ -66,6 +82,10 @@ Requires Node 20.12 or newer. There's no build step: the browser loads ES module
 
 Newest first. Add a line or two for each session that changes something.
 
+- **2026-11-24, later:**
+  - Multiplayer stage 1: shared demo rooms with avatars, an invite button and a name dialog.
+  - Added `ws`, pinned to 8.22.1 rather than the 12-day-old 8.23.0. Prefer releases at least 2 weeks old.
+  - Checked it with two headless Chrome tabs. Tests: 211 passing.
 - **2026-11-24:**
   - Added the YouTube TV playback source, the Play-from toggle, the wall TV and the server-side match cache, committed by the user as d4540fc.
   - Helped create the YouTube Data API v3 key, restricted to that API.
