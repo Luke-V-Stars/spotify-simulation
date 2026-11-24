@@ -37,6 +37,7 @@ const AUTH_ERROR_MESSAGES = {
   access_denied: 'Spotify access was declined. Connect again whenever you\'re ready.',
   not_configured: 'Spotify credentials aren\'t set up on the server yet.',
   state_mismatch: 'That sign-in attempt could not be verified. Please try again.',
+  handoff_failed: 'Signing in took too long to finish, or was started in another browser. Please try again.',
 };
 
 const auth = new AuthClient();

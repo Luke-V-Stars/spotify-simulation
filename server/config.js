@@ -13,6 +13,11 @@ function isPlaceholder(value) {
   return !value || /^your_/i.test(value.trim());
 }
 
+/** The origin a request was made to, as the browser sees it. */
+export function requestOrigin(req, config) {
+  return `${config.secureCookies ? 'https' : 'http'}://${req.headers.host}`;
+}
+
 export function loadConfig(env = process.env) {
   const clientId = env.SPOTIFY_CLIENT_ID;
   const clientSecret = env.SPOTIFY_CLIENT_SECRET;
@@ -40,8 +45,14 @@ export function loadConfig(env = process.env) {
     youtubeConfigured: youtubeApiKey !== null,
     /** Path the OAuth callback is served from, derived so it can't drift from the URI. */
     callbackPath: redirect.pathname,
-    /** Origin Spotify redirects back to. Cookies must be set on this host. */
+    /** Origin Spotify redirects back to. Sign-in's state cookie must be set on this host. */
     canonicalOrigin: redirect.origin,
+    /**
+     * Origin the room itself is served from. Spotify insists on 127.0.0.1 for local
+     * sign-in, but YouTube refuses to play licensed music on a page addressed by an IP
+     * number, so locally the room runs at localhost and sign-in hands the session over.
+     */
+    appOrigin: isLoopback ? `http://localhost:${redirectPort}` : redirect.origin,
     /** Stay private on developer machines; hosted deployments set HOST and PORT. */
     host: env.HOST || (isLoopback ? redirect.hostname.replace(/[[\]]/g, '') : '0.0.0.0'),
     port: Number(env.PORT || redirectPort),

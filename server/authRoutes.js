@@ -8,6 +8,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { requestOrigin } from './config.js';
 
 const AUTHORIZE_URL = 'https://accounts.spotify.com/authorize';
 const LOGOUT_URL = 'https://accounts.spotify.com/en/logout';
@@ -15,7 +16,12 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
 const REFRESH_COOKIE = 'sp_refresh';
 const STATE_COOKIE = 'sp_oauth_state';
+/** Ties a sign-in handed over to the room's host to the browser that started it. */
+const HANDOFF_COOKIE = 'sp_handoff';
 const STATE_MAX_AGE_SECONDS = 10 * 60;
+const HANDOFF_TTL_MS = 60 * 1000;
+const MAX_PENDING_HANDOFFS = 100;
+const NONCE_PATTERN = /^[0-9a-f]{48}$/;
 const REFRESH_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
 export const SCOPES = [
@@ -72,6 +78,25 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
 
   const clearCookie = (name) => buildCookie(name, '', 0);
 
+  /**
+   * Locally, Spotify returns to 127.0.0.1 but the room runs at localhost (see appOrigin in
+   * config.js), and cookies don't cross between the two. So the callback leaves the refresh
+   * token here under a one-time code, and the room's host collects it.
+   */
+  const handsOver = config.appOrigin !== config.canonicalOrigin;
+  /** One-time code -> {refreshToken, nonce, expiresAt}. */
+  const handoffs = new Map();
+
+  function storeHandoff(refreshToken, nonce) {
+    const now = Date.now();
+    for (const [code, handoff] of handoffs) {
+      if (handoff.expiresAt < now || handoffs.size >= MAX_PENDING_HANDOFFS) handoffs.delete(code);
+    }
+    const code = randomBytes(24).toString('hex');
+    handoffs.set(code, { refreshToken, nonce, expiresAt: now + HANDOFF_TTL_MS });
+    return code;
+  }
+
   async function requestToken(params) {
     const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
     const response = await fetchImpl(TOKEN_URL, {
@@ -86,14 +111,29 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
     return { ok: response.ok, status: response.status, body };
   }
 
-  function handleLogin(req, res) {
+  function handleLogin(req, res, url) {
     if (!config.configured) {
       return redirect(res, '/?auth_error=not_configured');
     }
     // Cookies are per-host, so state set on localhost would be missing when
     // Spotify returns to 127.0.0.1. Move to the redirect URI's host first.
-    const requestOrigin = `${config.secureCookies ? 'https' : 'http'}://${req.headers.host}`;
-    if (requestOrigin !== config.canonicalOrigin) {
+    const origin = requestOrigin(req, config);
+    const cookies = [];
+    if (handsOver) {
+      // Sign-in starts on the room's host, which remembers a nonce for collecting the
+      // session afterwards, and then carries on at the redirect URI's host.
+      if (origin === config.appOrigin) {
+        const nonce = randomBytes(24).toString('hex');
+        return redirect(res, `${config.canonicalOrigin}/auth/login?handoff=${nonce}`, [
+          buildCookie(HANDOFF_COOKIE, nonce, STATE_MAX_AGE_SECONDS),
+        ]);
+      }
+      const nonce = url.searchParams.get('handoff');
+      if (origin !== config.canonicalOrigin || !NONCE_PATTERN.test(nonce ?? '')) {
+        return redirect(res, `${config.appOrigin}/auth/login`);
+      }
+      cookies.push(buildCookie(HANDOFF_COOKIE, nonce, STATE_MAX_AGE_SECONDS));
+    } else if (origin !== config.canonicalOrigin) {
       return redirect(res, `${config.canonicalOrigin}/auth/login`);
     }
 
@@ -109,17 +149,19 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
     // Spotify would otherwise reuse the account this browser is signed in to, so end
     // that session first. `continue` is undocumented, but sends the browser on to authorize.
     const logoutQuery = new URLSearchParams({ continue: `${AUTHORIZE_URL}?${query}` });
-    redirect(res, `${LOGOUT_URL}?${logoutQuery}`, [buildCookie(STATE_COOKIE, state, STATE_MAX_AGE_SECONDS)]);
+    redirect(res, `${LOGOUT_URL}?${logoutQuery}`, [...cookies, buildCookie(STATE_COOKIE, state, STATE_MAX_AGE_SECONDS)]);
   }
 
   async function handleCallback(req, res, url) {
     const cookies = parseCookies(req.headers.cookie);
-    const clearState = clearCookie(STATE_COOKIE);
-    const failWith = (code) => redirect(res, `/?auth_error=${encodeURIComponent(code)}`, [clearState]);
+    const clearState = [clearCookie(STATE_COOKIE), ...(handsOver ? [clearCookie(HANDOFF_COOKIE)] : [])];
+    const failWith = (code) => redirect(res, `/?auth_error=${encodeURIComponent(code)}`, clearState);
 
     // The state check stops an attacker from logging a victim into the attacker's account.
     const state = url.searchParams.get('state');
     if (!state || state !== cookies[STATE_COOKIE]) return failWith('state_mismatch');
+    const nonce = cookies[HANDOFF_COOKIE];
+    if (handsOver && !NONCE_PATTERN.test(nonce ?? '')) return failWith('state_mismatch');
 
     const spotifyError = url.searchParams.get('error');
     if (spotifyError) return failWith(spotifyError);
@@ -139,10 +181,27 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
     }
     if (!result.ok || !result.body.refresh_token) return failWith('token_exchange_failed');
 
+    if (handsOver) {
+      const code = storeHandoff(result.body.refresh_token, nonce);
+      return redirect(res, `${config.appOrigin}/auth/handoff?code=${code}`, clearState);
+    }
     redirect(res, '/', [
-      clearState,
+      ...clearState,
       buildCookie(REFRESH_COOKIE, result.body.refresh_token, REFRESH_MAX_AGE_SECONDS),
     ]);
+  }
+
+  /** The room's host collects a session from the callback, in the browser that signed in. */
+  function handleHandoff(req, res, url) {
+    const code = url.searchParams.get('code') ?? '';
+    const handoff = handoffs.get(code);
+    handoffs.delete(code); // usable once, whatever happens next
+    const nonce = parseCookies(req.headers.cookie)[HANDOFF_COOKIE];
+    const clearNonce = clearCookie(HANDOFF_COOKIE);
+    if (!handoff || handoff.expiresAt < Date.now() || !nonce || nonce !== handoff.nonce) {
+      return redirect(res, '/?auth_error=handoff_failed', [clearNonce]);
+    }
+    redirect(res, '/', [clearNonce, buildCookie(REFRESH_COOKIE, handoff.refreshToken, REFRESH_MAX_AGE_SECONDS)]);
   }
 
   /** Mints a fresh access token from the refresh cookie. */
@@ -185,9 +244,11 @@ export function createAuthRoutes(config, fetchImpl = fetch) {
         authenticated: Boolean(parseCookies(req.headers.cookie)[REFRESH_COOKIE]),
       });
     } else if (method === 'GET' && pathname === '/auth/login') {
-      handleLogin(req, res);
+      handleLogin(req, res, url);
     } else if (method === 'GET' && pathname === config.callbackPath) {
       await handleCallback(req, res, url);
+    } else if (handsOver && method === 'GET' && pathname === '/auth/handoff') {
+      handleHandoff(req, res, url);
     } else if (method === 'GET' && pathname === '/auth/token') {
       await handleToken(req, res);
     } else if (method === 'POST' && pathname === '/auth/logout') {

@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAuthRoutes } from './authRoutes.js';
+import { requestOrigin } from './config.js';
 import { createYouTubeMatcher, MatchCache, parseMatchQuery, YouTubeMatchError } from './youtubeMatches.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -111,6 +112,12 @@ export function createApp(config, fetchImpl = fetch, { matchCache = new MatchCac
       }
 
       if (req.method === 'GET' || req.method === 'HEAD') {
+        // Locally, the room runs at localhost rather than 127.0.0.1, where YouTube won't
+        // play music (see appOrigin in config.js). Sign-in still uses 127.0.0.1.
+        if (config.appOrigin !== config.canonicalOrigin && requestOrigin(req, config) === config.canonicalOrigin) {
+          res.writeHead(302, { Location: `${config.appOrigin}${req.url}`, 'Cache-Control': 'no-store' }).end();
+          return;
+        }
         await serveStatic(req, res, url.pathname);
       } else {
         res.writeHead(405).end('Method not allowed');

@@ -13,7 +13,7 @@ npm install
 npm start
 ```
 
-Open <http://127.0.0.1:8888> and choose **Explore the demo room**. The demo needs no Spotify account: it uses an invented library and silently simulates playback, so everything except the audio can be tried straight away.
+Open <http://localhost:8888> and choose **Explore the demo room**. The demo needs no Spotify account: it uses an invented library and silently simulates playback, so everything except the audio can be tried straight away.
 
 ## Connecting Spotify
 
@@ -30,7 +30,7 @@ Open <http://127.0.0.1:8888> and choose **Explore the demo room**. The demo need
 
 5. Restart the server and click **Connect Spotify**.
 
-Open the app at `127.0.0.1`, not `localhost`: Spotify no longer accepts `localhost` redirect URIs. `.env` is ignored by git, so credentials stay out of the repository.
+The redirect URI must use `127.0.0.1`, because Spotify no longer accepts `localhost` ones. The room itself runs at `localhost`, though, because YouTube won't play music on a page addressed by an IP number. So signing in passes through `127.0.0.1` and then hands the session back to `localhost`, using a one-time code that expires after a minute and only works in the browser that started signing in. Opening `127.0.0.1:8888` takes you to `localhost` automatically. `.env` is ignored by git, so credentials stay out of the repository.
 
 ### Spotify's limits
 
@@ -55,6 +55,7 @@ The key stays on the server, which searches YouTube for each song. Only the vide
 - **Automatic switch:** when Spotify can't play in this session, songs switch to YouTube by themselves and the **Play from** button goes away.
 - **The daily limit:** Google's default quota allows about 100 searches a day, and it resets at midnight Pacific time. Each song is searched for only the first time it's played. Matches are saved in `data/youtube-matches.json`, which is ignored by git, and kept for 30 days, so replaying songs or restarting the server costs nothing.
 - **Ads** play as they would on YouTube.
+- **Use `localhost`:** YouTube refuses to play music videos, with error 150, on a page opened at an IP address such as `127.0.0.1`. The server sends you to `localhost` for this reason. A deployed site with a real domain name isn't affected.
 - **The on-screen TV** stays visible, at least 200 × 200 pixels and uncovered, while a song is loaded, as YouTube's rules for embedded players require. The song panel moves below it. Its line underneath shows which video is playing, so a wrong match is easy to spot.
 - **The TV in the room** hangs on the far wall above the plaques. It shows the cover, title and artist of whatever is playing, from either service. It can't show the video itself, because browsers don't let a page read the picture from another site's player.
 - **Next and previous** move through the whole playlist, or through the shelf for Liked Songs, Your Top Songs and Suggested For You. At the end of the list, playback stops. A song with no playable video is skipped when the list reaches it, but not when you chose it yourself.
@@ -147,4 +148,4 @@ The room is designed so that cost grows slowly with library size:
 npm test
 ```
 
-These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, YouTube matching, quota errors and the match cache with YouTube mocked, the YouTube player and switching between services, the OAuth routes with Spotify mocked, and static file safety. No credentials or network access are needed.
+These cover shelf planning and layout, shelf geometry and softened boxes, walking and collisions, picking, Spotify response handling and retries, library error messages, player position and seeking, YouTube matching, quota errors and the match cache with YouTube mocked, the YouTube player and switching between services, the OAuth routes and the handover to `localhost` with Spotify mocked, and static file safety. No credentials or network access are needed.

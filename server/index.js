@@ -13,7 +13,7 @@ try {
 const config = loadConfig();
 
 createApp(config).listen(config.port, config.host, () => {
-  console.log(`Listening room open at ${config.canonicalOrigin}`);
+  console.log(`Listening room open at ${config.appOrigin}`);
   if (!config.configured) {
     console.log(`Spotify login disabled, demo mode only. Missing in .env: ${config.missing.join(', ')}`);
   }
